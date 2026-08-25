@@ -1,19 +1,23 @@
 import React, { createContext, useContext, useState } from "react";
-import { mockLogin, isAuthed, logout as doLogout } from "../mock";
+import { apiLogin, isAuthed, clearToken } from "../api";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [authed, setAuthed] = useState(() => isAuthed());
 
-  const login = (username, password) => {
-    const res = mockLogin(username, password);
-    if (res.success) setAuthed(true);
-    return res.success;
+  const login = async (username, password) => {
+    try {
+      await apiLogin(username, password);
+      setAuthed(true);
+      return true;
+    } catch (e) {
+      return false;
+    }
   };
 
   const logout = () => {
-    doLogout();
+    clearToken();
     setAuthed(false);
   };
 

@@ -14,9 +14,10 @@ export default function AdminLogin() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (login(username, password)) {
+    const ok = await login(username, password);
+    if (ok) {
       navigate("/admin/dashboard");
     } else {
       toast({

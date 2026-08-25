@@ -1,17 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Line,
-  LineChart,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Line, LineChart,
 } from "recharts";
 import { Eye, MousePointerClick, Image as ImageIcon, TrendingUp } from "lucide-react";
-import { getBanners, getSettings, getDailyStats } from "../mock";
+import { fetchBanners, fetchOverview, fetchDaily } from "../api";
 
 function StatCard({ icon: Icon, label, value, tone }) {
   return (
@@ -28,15 +21,20 @@ function StatCard({ icon: Icon, label, value, tone }) {
 }
 
 export default function AdminDashboard() {
-  const banners = getBanners();
-  const settings = getSettings();
-  const daily = getDailyStats();
+  const [banners, setBanners] = useState([]);
+  const [overview, setOverview] = useState({ totalViews: 0, totalClicks: 0, activeBanners: 0, ctr: 0 });
+  const [daily, setDaily] = useState([]);
 
-  const totalClicks = banners.reduce((s, b) => s + (b.clicks || 0), 0);
+  useEffect(() => {
+    (async () => {
+      const [b, o, d] = await Promise.all([fetchBanners(true), fetchOverview(), fetchDaily()]);
+      setBanners(b);
+      setOverview(o);
+      setDaily(d);
+    })();
+  }, []);
+
   const topBanners = [...banners].sort((a, b) => b.clicks - a.clicks).slice(0, 5);
-  const ctr = settings.totalViews
-    ? ((totalClicks / settings.totalViews) * 100).toFixed(1)
-    : "0";
 
   return (
     <div className="p-8">
@@ -44,14 +42,13 @@ export default function AdminDashboard() {
       <p className="mt-1 text-sm text-slate-500">Reklam performansı genel bakış</p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={Eye} label="Toplam Görüntülenme" value={settings.totalViews?.toLocaleString() || 0} tone="bg-blue-100 text-blue-600" />
-        <StatCard icon={MousePointerClick} label="Toplam Tıklama" value={totalClicks.toLocaleString()} tone="bg-emerald-100 text-emerald-600" />
-        <StatCard icon={ImageIcon} label="Aktif Banner" value={banners.filter((b) => b.active).length} tone="bg-amber-100 text-amber-600" />
-        <StatCard icon={TrendingUp} label="Tıklama Oranı (CTR)" value={`%${ctr}`} tone="bg-purple-100 text-purple-600" />
+        <StatCard icon={Eye} label="Toplam Görüntülenme" value={overview.totalViews?.toLocaleString()} tone="bg-blue-100 text-blue-600" />
+        <StatCard icon={MousePointerClick} label="Toplam Tıklama" value={overview.totalClicks?.toLocaleString()} tone="bg-emerald-100 text-emerald-600" />
+        <StatCard icon={ImageIcon} label="Aktif Banner" value={overview.activeBanners} tone="bg-amber-100 text-amber-600" />
+        <StatCard icon={TrendingUp} label="Tıklama Oranı (CTR)" value={`%${overview.ctr}`} tone="bg-purple-100 text-purple-600" />
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Daily views/clicks */}
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-slate-700">Son 14 Gün</h2>
           <ResponsiveContainer width="100%" height={260}>
@@ -66,7 +63,6 @@ export default function AdminDashboard() {
           </ResponsiveContainer>
         </div>
 
-        {/* Clicks per banner */}
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-slate-700">Banner Bazında Tıklama</h2>
           <ResponsiveContainer width="100%" height={260}>
@@ -81,7 +77,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Top banners table */}
       <div className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
         <h2 className="border-b border-slate-100 p-5 text-sm font-semibold text-slate-700">En Çok Tıklanan Bannerlar</h2>
         <div className="divide-y divide-slate-100">
@@ -90,7 +85,7 @@ export default function AdminDashboard() {
               <span className="w-5 text-sm font-bold text-slate-400">{i + 1}</span>
               <img src={b.image} alt="" className="h-10 w-16 rounded object-cover" />
               <span className="flex-1 text-sm font-medium text-slate-700">{b.title}</span>
-              <span className="text-sm font-semibold text-slate-900">{b.clicks.toLocaleString()} tıklama</span>
+              <span className="text-sm font-semibold text-slate-900">{b.clicks?.toLocaleString()} tıklama</span>
             </div>
           ))}
         </div>

@@ -1,12 +1,12 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Plus, Pencil, Trash2, ArrowUp, ArrowDown, Upload, Link2,
   ExternalLink, GripVertical,
 } from "lucide-react";
 import {
-  getBanners, addBanner, updateBanner, deleteBanner, saveBanners,
-  getSettings, saveSettings,
-} from "../mock";
+  fetchBanners, createBanner, updateBanner, deleteBanner, reorderBanners,
+  fetchSettings, saveSettings, uploadImage,
+} from "../api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -25,64 +25,86 @@ const empty = {
 
 export default function AdminBanners() {
   const { toast } = useToast();
-  const [banners, setBanners] = useState(() => getBanners());
-  const [settings, setSettings] = useState(() => getSettings());
+  const [banners, setBanners] = useState([]);
+  const [settings, setSettings] = useState({ gridColumns: 2, ageGateEnabled: true });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
+  const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
 
-  const refresh = () => setBanners(getBanners());
+  const refresh = async () => setBanners(await fetchBanners(true));
+
+  useEffect(() => {
+    (async () => {
+      setBanners(await fetchBanners(true));
+      setSettings(await fetchSettings());
+    })();
+  }, []);
 
   const openNew = () => { setEditing(null); setForm(empty); setOpen(true); };
   const openEdit = (b) => { setEditing(b); setForm(b); setOpen(true); };
 
-  const handleFile = (e) => {
+  const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setForm((f) => ({ ...f, image: reader.result }));
-    reader.readAsDataURL(file);
+    setUploading(true);
+    try {
+      const url = await uploadImage(file);
+      setForm((f) => ({ ...f, image: url }));
+    } catch (err) {
+      toast({ title: "Yükleme hatası", description: "Görsel yüklenemedi.", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.image || !form.url) {
       toast({ title: "Eksik bilgi", description: "Görsel ve link zorunludur.", variant: "destructive" });
       return;
     }
-    if (editing) {
-      updateBanner(editing.id, form);
-      toast({ title: "Güncellendi", description: "Banner güncellendi." });
-    } else {
-      addBanner(form);
-      toast({ title: "Eklendi", description: "Yeni banner eklendi." });
+    try {
+      if (editing) {
+        const { id, clicks, order, ...patch } = form;
+        await updateBanner(editing.id, patch);
+        toast({ title: "Güncellendi", description: "Banner güncellendi." });
+      } else {
+        await createBanner(form);
+        toast({ title: "Eklendi", description: "Yeni banner eklendi." });
+      }
+      await refresh();
+      setOpen(false);
+    } catch (err) {
+      toast({ title: "Hata", description: "İşlem başarısız.", variant: "destructive" });
     }
-    refresh();
-    setOpen(false);
   };
 
-  const handleDelete = (id) => {
-    deleteBanner(id);
-    refresh();
+  const handleDelete = async (id) => {
+    await deleteBanner(id);
+    await refresh();
     toast({ title: "Silindi", description: "Banner silindi." });
   };
 
-  const toggleActive = (b) => { updateBanner(b.id, { active: !b.active }); refresh(); };
+  const toggleActive = async (b) => {
+    await updateBanner(b.id, { active: !b.active });
+    await refresh();
+  };
 
-  const move = (index, dir) => {
+  const move = async (index, dir) => {
     const arr = [...banners];
     const target = index + dir;
     if (target < 0 || target >= arr.length) return;
     [arr[index], arr[target]] = [arr[target], arr[index]];
-    arr.forEach((b, i) => (b.order = i));
-    saveBanners(arr);
-    refresh();
+    setBanners(arr);
+    await reorderBanners(arr.map((b) => b.id));
+    await refresh();
   };
 
-  const updateSetting = (patch) => {
+  const updateSetting = async (patch) => {
     const s = { ...settings, ...patch };
     setSettings(s);
-    saveSettings(s);
+    await saveSettings(s);
   };
 
   return (
@@ -167,8 +189,8 @@ export default function AdminBanners() {
                   <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   <Input value={form.image?.startsWith("data:") ? "(yüklenen dosya)" : form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} placeholder="Görsel URL" className="pl-9" disabled={form.image?.startsWith("data:")} />
                 </div>
-                <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} className="gap-2">
-                  <Upload className="h-4 w-4" /> Yükle
+                <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading} className="gap-2">
+                  <Upload className="h-4 w-4" /> {uploading ? "Yükleniyor..." : "Yükle"}
                 </Button>
                 <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
               </div>

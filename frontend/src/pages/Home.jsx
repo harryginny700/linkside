@@ -1,22 +1,30 @@
 import React, { useEffect, useState } from "react";
 import AgeGate from "../components/AgeGate";
-import {
-  getBanners,
-  getSettings,
-  recordClick,
-  recordView,
-} from "../mock";
+import { fetchBanners, fetchSettings, recordView, clickBanner } from "../api";
 
 export default function Home() {
-  const settings = getSettings();
-  const [verified, setVerified] = useState(
-    () => !settings.ageGateEnabled || sessionStorage.getItem("age_ok") === "1"
-  );
-  const [banners] = useState(() => getBanners().filter((b) => b.active));
+  const [settings, setSettings] = useState(null);
+  const [banners, setBanners] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [verified, setVerified] = useState(false);
 
   useEffect(() => {
-    if (verified) recordView();
-  }, [verified]);
+    (async () => {
+      try {
+        const [s, b] = await Promise.all([fetchSettings(), fetchBanners(false)]);
+        setSettings(s);
+        setBanners(b);
+        const ok = !s.ageGateEnabled || sessionStorage.getItem("age_ok") === "1";
+        setVerified(ok);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (verified && !loading) recordView();
+  }, [verified, loading]);
 
   const handleVerify = () => {
     sessionStorage.setItem("age_ok", "1");
@@ -24,15 +32,19 @@ export default function Home() {
   };
 
   const openLink = (b) => {
-    recordClick(b.id);
+    clickBanner(b.id);
     window.open(b.url, "_blank", "noopener");
   };
 
-  const topBanners = banners.filter((b) => b.section === "top");
-  const gridBanners = banners.filter((b) => b.section === "grid");
-  const cols = settings.gridColumns || 2;
+  if (loading) {
+    return <div className="site-bg min-h-screen" />;
+  }
 
   if (!verified) return <AgeGate onVerified={handleVerify} />;
+
+  const topBanners = banners.filter((b) => b.section === "top");
+  const gridBanners = banners.filter((b) => b.section === "grid");
+  const cols = settings?.gridColumns || 2;
 
   return (
     <div className="site-bg py-8">
@@ -45,12 +57,7 @@ export default function Home() {
               onClick={() => openLink(b)}
               className="banner-hover block w-full overflow-hidden rounded-xl border-2 border-amber-500/40"
             >
-              <img
-                src={b.image}
-                alt={b.title}
-                loading="lazy"
-                className="h-auto w-full object-cover"
-              />
+              <img src={b.image} alt={b.title} loading="lazy" className="h-auto w-full object-cover" />
             </button>
           ))}
         </div>
@@ -67,12 +74,7 @@ export default function Home() {
               className="banner-hover block overflow-hidden rounded-xl border-2 border-amber-500/40"
               style={{ gridColumn: `span ${Math.min(b.span || 1, cols)}` }}
             >
-              <img
-                src={b.image}
-                alt={b.title}
-                loading="lazy"
-                className="h-full w-full object-cover"
-              />
+              <img src={b.image} alt={b.title} loading="lazy" className="h-full w-full object-cover" />
             </button>
           ))}
         </div>
