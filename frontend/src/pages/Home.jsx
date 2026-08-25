@@ -1,6 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { Settings } from "lucide-react";
 import AgeGate from "../components/AgeGate";
 import {
   getBanners,
@@ -38,15 +36,6 @@ export default function Home() {
 
   return (
     <div className="site-bg py-8">
-      {/* discreet admin entry */}
-      <Link
-        to="/admin"
-        className="fixed right-4 top-4 z-40 flex h-9 w-9 items-center justify-center rounded-full bg-white/5 text-slate-400 transition hover:bg-white/10 hover:text-white"
-        title="Yönetim Paneli"
-      >
-        <Settings className="h-5 w-5" />
-      </Link>
-
       <div className="mx-auto w-full max-w-[1120px] px-3">
         {/* Top banner group */}
         <div className="space-y-4">
