@@ -14,6 +14,7 @@ export default function Home() {
         const [s, b] = await Promise.all([fetchSettings(), fetchBanners(false)]);
         setSettings(s);
         setBanners(b);
+        if (s.siteTitle) document.title = s.siteTitle;
         const ok = !s.ageGateEnabled || sessionStorage.getItem("age_ok") === "1";
         setVerified(ok);
       } finally {

@@ -31,6 +31,7 @@ export default function AdminBanners() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
   const [uploading, setUploading] = useState(false);
+  const [titleInput, setTitleInput] = useState("");
   const fileRef = useRef(null);
 
   const refresh = async () => setBanners(await fetchBanners(true));
@@ -38,7 +39,9 @@ export default function AdminBanners() {
   useEffect(() => {
     (async () => {
       setBanners(await fetchBanners(true));
-      setSettings(await fetchSettings());
+      const s = await fetchSettings();
+      setSettings(s);
+      setTitleInput(s.siteTitle || "");
     })();
   }, []);
 
@@ -107,6 +110,11 @@ export default function AdminBanners() {
     await saveSettings(s);
   };
 
+  const saveTitle = async () => {
+    await updateSetting({ siteTitle: titleInput });
+    toast({ title: "Kaydedildi", description: "Site başlığı güncellendi." });
+  };
+
   return (
     <div className="p-8">
       <div className="flex items-center justify-between">
@@ -120,7 +128,21 @@ export default function AdminBanners() {
       </div>
 
       {/* Layout settings */}
-      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-sm font-semibold text-slate-800">Site Başlığı</p>
+        <p className="text-xs text-slate-500">Tarayıcı sekmesinde görünen başlık</p>
+        <div className="mt-3 flex gap-2">
+          <Input
+            value={titleInput}
+            onChange={(e) => setTitleInput(e.target.value)}
+            placeholder="Örn. Güvenli Platform"
+            className="max-w-md"
+          />
+          <Button onClick={saveTitle} className="bg-slate-900 hover:bg-slate-800">Kaydet</Button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div>
             <p className="text-sm font-semibold text-slate-800">Kolon Sayısı (Grid)</p>

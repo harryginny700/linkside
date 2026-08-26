@@ -69,10 +69,6 @@ export default function AdminLogin() {
             Giriş Yap
           </Button>
         </form>
-
-        <p className="mt-4 text-center text-xs text-slate-500">
-          Demo: admin / admin123
-        </p>
       </div>
     </div>
   );
