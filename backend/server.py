@@ -3,6 +3,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import UpdateOne
 import os
 import logging
 import uuid
@@ -116,7 +117,7 @@ async def get_banners(all: bool = False):
 
 @api_router.post("/banners")
 async def create_banner(data: BannerIn, username: str = Depends(get_current_user)):
-    banners = await db.banners.find().sort("order", -1).to_list(1)
+    banners = await db.banners.find({}, {"order": 1}).sort("order", -1).to_list(1)
     max_order = banners[0]["order"] if banners else 0
     b = Banner(**data.dict(), order=max_order + 1)
     await db.banners.insert_one(b.dict())
@@ -142,8 +143,9 @@ async def delete_banner(banner_id: str, username: str = Depends(get_current_user
 
 @api_router.post("/banners/reorder")
 async def reorder(data: ReorderIn, username: str = Depends(get_current_user)):
-    for i, bid in enumerate(data.ids):
-        await db.banners.update_one({"id": bid}, {"$set": {"order": i}})
+    if data.ids:
+        ops = [UpdateOne({"id": bid}, {"$set": {"order": i}}) for i, bid in enumerate(data.ids)]
+        await db.banners.bulk_write(ops)
     return {"ok": True}
 
 
@@ -197,10 +199,10 @@ async def record_view():
 
 @api_router.get("/stats/overview")
 async def stats_overview(username: str = Depends(get_current_user)):
-    banners = await db.banners.find().to_list(1000)
+    banners = await db.banners.find({}, {"clicks": 1, "active": 1}).to_list(1000)
     total_clicks = sum(b.get("clicks", 0) for b in banners)
     active = sum(1 for b in banners if b.get("active"))
-    daily = await db.daily_stats.find().to_list(1000)
+    daily = await db.daily_stats.find({}, {"views": 1}).to_list(1000)
     total_views = sum(d.get("views", 0) for d in daily)
     ctr = round((total_clicks / total_views * 100), 1) if total_views else 0
     return {
