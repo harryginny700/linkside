@@ -11,6 +11,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Switch } from "../components/ui/switch";
+import { Slider } from "../components/ui/slider";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "../components/ui/dialog";
@@ -32,6 +33,8 @@ export default function AdminBanners() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
   const [uploading, setUploading] = useState(false);
+  const [logoSize, setLogoSize] = useState(36);
+  const logoSizeTimer = useRef(null);
   const fileRef = useRef(null);
 
   const refresh = async () => setBanners(await fetchBanners(true));
@@ -39,7 +42,9 @@ export default function AdminBanners() {
   useEffect(() => {
     (async () => {
       setBanners(await fetchBanners(true));
-      setSettings(await fetchSettings());
+      const s = await fetchSettings();
+      setSettings(s);
+      setLogoSize(Number(s.logoSize) || 36);
     })();
   }, []);
 
@@ -118,6 +123,24 @@ export default function AdminBanners() {
       toast({ title: "Hata", description: "Ayarlar kaydedilemedi.", variant: "destructive" });
     }
   };
+
+  // Kart logo boyutu: slider + gecikmeli otomatik kayıt
+  const handleLogoSizeChange = (val) => {
+    const v = Math.round(Math.min(140, Math.max(16, Array.isArray(val) ? val[0] : val)));
+    setLogoSize(v);
+    setSettings((s) => ({ ...s, logoSize: v }));
+    if (logoSizeTimer.current) clearTimeout(logoSizeTimer.current);
+    logoSizeTimer.current = setTimeout(async () => {
+      try {
+        await saveSettings({ logoSize: v });
+        toast({ title: "Kaydedildi", description: `Logo boyutu: ${v}px` });
+      } catch (err) {
+        toast({ title: "Hata", description: "Logo boyutu kaydedilemedi.", variant: "destructive" });
+      }
+    }, 600);
+  };
+  const adjustLogoSize = (delta) => handleLogoSizeChange(logoSize + delta);
+
   const addTicker = () => setSettings((s) => ({
     ...s,
     tickerItems: [...(s.tickerItems || []), { text: "", color: "#22d3ee" }],
@@ -214,18 +237,39 @@ export default function AdminBanners() {
         </div>
       </div>
 
-      {/* Kolon sayısı */}
-      <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:max-w-sm">
-        <div>
-          <p className="text-sm font-semibold text-slate-800">Kolon Sayısı (Grid)</p>
-          <p className="text-xs text-slate-500">Alt ızgaradaki sütun sayısı</p>
+      {/* Kolon sayısı + logo boyutu */}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Kolon Sayısı (Grid)</p>
+            <p className="text-xs text-slate-500">Alt ızgaradaki sütun sayısı</p>
+          </div>
+          <Select value={String(settings.gridColumns || 3)} onValueChange={(v) => updateSetting({ gridColumns: Number(v) })}>
+            <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {[1, 2, 3, 4].map((n) => <SelectItem key={n} value={String(n)}>{n} kolon</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
-        <Select value={String(settings.gridColumns || 3)} onValueChange={(v) => updateSetting({ gridColumns: Number(v) })}>
-          <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {[1, 2, 3, 4].map((n) => <SelectItem key={n} value={String(n)}>{n} kolon</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Kart Logo Boyutu</p>
+            <p className="text-xs text-slate-500">Kartlardaki görsel yüksekliği</p>
+            <p className="mt-1 font-mono text-lg font-bold text-slate-800" data-testid="logo-size-label">{logoSize}px</p>
+          </div>
+          <div className="flex w-36 items-center gap-2 sm:w-44">
+            <Button type="button" variant="outline" size="icon" onClick={() => adjustLogoSize(-4)} className="shrink-0 text-base">−</Button>
+            <Slider
+              value={[logoSize]}
+              min={16}
+              max={140}
+              step={2}
+              onValueChange={handleLogoSizeChange}
+              data-testid="logo-size-slider"
+            />
+            <Button type="button" variant="outline" size="icon" onClick={() => adjustLogoSize(4)} className="shrink-0 text-base">+</Button>
+          </div>
+        </div>
       </div>
 
       {/* Banner list */}

@@ -96,6 +96,7 @@ class Settings(BaseModel):
     tickerItems: List[TickerItem] = DEFAULT_TICKER
     footerText: str = "© 2026 EMRE18 — 18+: SORUMLU REKLAM YAYINCILIĞI"
     footerDomains: str = "emre18.com"
+    logoSize: int = 36
     gridColumns: int = 3
     ageGateEnabled: bool = False
 
@@ -204,9 +205,22 @@ async def get_settings():
 @api_router.put("/settings")
 async def update_settings(data: dict, username: str = Depends(get_current_user)):
     data.pop("_id", None)
+    # Sayısal alanları zorla (yanlış tip gelirse düzelt/at)
+    if "logoSize" in data:
+        try:
+            data["logoSize"] = max(16, min(140, int(float(data["logoSize"]))))
+        except (TypeError, ValueError):
+            data.pop("logoSize")
+    if "gridColumns" in data:
+        try:
+            data["gridColumns"] = max(1, min(6, int(float(data["gridColumns"]))))
+        except (TypeError, ValueError):
+            data.pop("gridColumns")
     await db.settings.update_one({"_id": "singleton"}, {"$set": data}, upsert=True)
     s = await db.settings.find_one({"_id": "singleton"})
-    return clean(s)
+    merged = Settings().dict()
+    merged.update({k: v for k, v in s.items() if k != "_id"})
+    return clean(merged)
 
 
 # ----------------- Views & Stats -----------------

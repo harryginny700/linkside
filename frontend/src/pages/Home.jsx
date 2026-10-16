@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { fetchBanners, fetchSettings, recordView, clickBanner } from "../api";
 
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// Göreli görsel yollarını (/api/uploads/...) backend adresine tamamla
+const resolveImage = (src) => (src?.startsWith("/") ? `${BACKEND_URL}${src}` : src);
+
 // saray5 paleti (accent boş olan kartlar için otomatik)
 const PALETTE = ["#22c55e", "#8a0f28", "#10f4b0", "#facc14", "#3b82f6", "#a78bfa"];
 const TOP_ACCENT = "#facc14";
@@ -71,9 +75,9 @@ function AdCard({ b, accent, isTop, spanStyle, onClick }) {
           <img
             data-testid="ad-card-logo"
             alt={headline}
-            src={b.image}
+            src={resolveImage(b.image)}
             loading="lazy"
-            className="mb-0.5 max-h-5 w-auto max-w-[85%] object-contain transition-transform duration-200 group-hover:scale-105 sm:mb-1 sm:max-h-9 sm:max-w-[70%]"
+            className="mb-0.5 max-h-[var(--logo-h-m,20px)] w-auto max-w-[85%] object-contain transition-transform duration-200 group-hover:scale-105 sm:mb-1 sm:max-h-[var(--logo-h,36px)] sm:max-w-[70%]"
             onError={(e) => { e.currentTarget.style.display = "none"; }}
           />
         )}
@@ -149,9 +153,13 @@ export default function Home() {
   const cols = Math.min(settings?.gridColumns || 3, 6);
   const brand = settings?.brandName || "EMRE18";
   const ticker = settings?.tickerItems || [];
+  const logoSize = Math.min(140, Math.max(16, Number(settings?.logoSize) || 36));
 
   return (
-    <div className="site-bg flex min-h-screen flex-col">
+    <div
+      className="site-bg flex min-h-screen flex-col"
+      style={{ "--logo-h": `${logoSize}px`, "--logo-h-m": `${Math.max(14, Math.round(logoSize * 0.55))}px` }}
+    >
       {/* Üst duyuru barı (kayan marquee) */}
       <header className="sticky top-0 z-40 border-b border-white/5" style={{ background: "rgb(12, 14, 19)" }}>
         <div className="mx-auto flex h-11 w-full max-w-6xl items-center gap-4 px-3 sm:px-4">

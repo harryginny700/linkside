@@ -1,347 +1,267 @@
 #!/usr/bin/env python3
 """
-Backend test for saray5-style image upload feature
-Tests POST /api/upload (MongoDB storage) and GET /api/uploads/{name} (public serve)
+Backend API test for logoSize setting feature
+Tests GET/PUT /api/settings with logoSize field
 """
 import requests
-import io
-from PIL import Image
+import json
 
-# Backend base URL
-BASE_URL = "https://fc5c4110-4c6f-460a-a59f-91cc49411a0b.preview.emergentagent.com/api"
-
-# Test credentials
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "admin123"
+BASE_URL = "http://localhost:8001/api"
+ADMIN_USER = "admin"
+ADMIN_PASS = "admin123"
 
 def get_auth_token():
     """Login and get JWT token"""
     resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": ADMIN_USERNAME,
-        "password": ADMIN_PASSWORD
+        "username": ADMIN_USER,
+        "password": ADMIN_PASS
     })
     if resp.status_code != 200:
         raise Exception(f"Login failed: {resp.status_code} {resp.text}")
     return resp.json()["token"]
 
-def create_test_png(size_bytes=1000):
-    """Create a small test PNG image in memory"""
-    # Create a simple 10x10 red image
-    img = Image.new('RGB', (10, 10), color='red')
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    buf.seek(0)
-    
-    # If we need a larger file, pad it
-    data = buf.getvalue()
-    if len(data) < size_bytes:
-        # Pad with zeros to reach desired size
-        data = data + b'\x00' * (size_bytes - len(data))
-    
-    return data
-
-def create_large_png(size_mb=5.1):
-    """Create a PNG-ish file over 5MB"""
-    # PNG magic bytes
-    png_header = b'\x89PNG\r\n\x1a\n'
-    # Create file slightly over 5MB
-    size_bytes = int(size_mb * 1024 * 1024)
-    data = png_header + b'\x00' * (size_bytes - len(png_header))
-    return data
-
-def test_1_upload_with_auth():
-    """Test 1: POST /api/upload with auth + small PNG → 200, url starts with '/api/uploads/' and ends with '.png'"""
-    print("\n=== Test 1: Upload with auth + small PNG ===")
-    token = get_auth_token()
-    
-    # Create a small PNG
-    png_data = create_test_png(1000)
-    
-    # Upload
-    files = {'file': ('test.png', png_data, 'image/png')}
-    headers = {'Authorization': f'Bearer {token}'}
-    resp = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
-    
-    print(f"Status: {resp.status_code}")
-    print(f"Response: {resp.json()}")
-    
+def test_1_get_settings_includes_logosize():
+    """Test 1: GET /api/settings (public) includes logoSize field, numeric, currently 64"""
+    print("\n=== TEST 1: GET /api/settings includes logoSize ===")
+    resp = requests.get(f"{BASE_URL}/settings")
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
     data = resp.json()
-    assert "url" in data, "Response missing 'url' field"
-    url = data["url"]
-    assert url.startswith("/api/uploads/"), f"URL should start with '/api/uploads/', got: {url}"
-    assert url.endswith(".png"), f"URL should end with '.png', got: {url}"
     
-    print(f"✅ Test 1 PASSED: Upload returned URL: {url}")
-    return url, png_data
+    assert "logoSize" in data, "logoSize field missing from response"
+    assert isinstance(data["logoSize"], int), f"logoSize should be int, got {type(data['logoSize'])}"
+    print(f"✅ logoSize field present: {data['logoSize']} (type: {type(data['logoSize']).__name__})")
+    
+    # Note: The review request says "currently 64" but we'll report actual value
+    if data["logoSize"] == 64:
+        print(f"✅ logoSize is 64 as expected")
+    else:
+        print(f"⚠️  logoSize is {data['logoSize']} (expected 64 per review request)")
+    
+    return data
 
-def test_2_serve_uploaded_file(url, original_bytes):
-    """Test 2: GET {url} (public, no auth) → 200, content-type image/png, body bytes identical"""
-    print(f"\n=== Test 2: Serve uploaded file (public, no auth) ===")
+def test_2_put_partial_logosize_preserves_fields(token):
+    """Test 2: PUT /api/settings with auth and partial body {"logoSize": 100} preserves all other fields"""
+    print("\n=== TEST 2: PUT partial logoSize=100, verify all fields intact ===")
     
-    # Construct full URL
-    full_url = f"https://fc5c4110-4c6f-460a-a59f-91cc49411a0b.preview.emergentagent.com{url}"
+    # Get current settings first
+    resp = requests.get(f"{BASE_URL}/settings")
+    before = resp.json()
+    print(f"Before PUT: brandName={before.get('brandName')}, gridColumns={before.get('gridColumns')}, tickerItems count={len(before.get('tickerItems', []))}")
     
-    # GET without auth
-    resp = requests.get(full_url)
-    
-    print(f"Status: {resp.status_code}")
-    print(f"Content-Type: {resp.headers.get('content-type')}")
-    print(f"Content-Length: {len(resp.content)}")
-    
+    # Partial PUT with only logoSize
+    resp = requests.put(
+        f"{BASE_URL}/settings",
+        json={"logoSize": 100},
+        headers={"Authorization": f"Bearer {token}"}
+    )
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
-    assert resp.headers.get('content-type') == 'image/png', f"Expected content-type image/png, got {resp.headers.get('content-type')}"
+    data = resp.json()
     
-    # Check PNG magic bytes (first 8 bytes: 89 50 4E 47 0D 0A 1A 0A)
-    png_magic = b'\x89PNG\r\n\x1a\n'
-    assert resp.content[:8] == png_magic, f"PNG magic bytes mismatch. Got: {resp.content[:8].hex()}"
+    # Verify logoSize updated
+    assert data.get("logoSize") == 100, f"logoSize should be 100, got {data.get('logoSize')}"
+    print(f"✅ logoSize updated to 100")
     
-    # Check length matches (allowing for padding we added)
-    # The original PNG should be in the response
-    assert len(resp.content) >= 100, f"Response too small: {len(resp.content)} bytes"
+    # Verify other fields preserved
+    assert data.get("brandName") == before.get("brandName"), f"brandName changed! Was {before.get('brandName')}, now {data.get('brandName')}"
+    assert data.get("gridColumns") == before.get("gridColumns"), f"gridColumns changed! Was {before.get('gridColumns')}, now {data.get('gridColumns')}"
+    assert len(data.get("tickerItems", [])) == len(before.get("tickerItems", [])), f"tickerItems count changed!"
     
-    print(f"✅ Test 2 PASSED: File served correctly with PNG magic bytes {resp.content[:8].hex()}")
+    print(f"✅ All other fields preserved: brandName={data.get('brandName')}, gridColumns={data.get('gridColumns')}, tickerItems count={len(data.get('tickerItems', []))}")
+    
+    # Verify specific values mentioned in review request
+    if data.get("brandName") == "EMRE18":
+        print(f"✅ brandName='EMRE18' confirmed")
+    else:
+        print(f"⚠️  brandName is '{data.get('brandName')}' (review request expected 'EMRE18')")
+    
+    if data.get("gridColumns") == 3:
+        print(f"✅ gridColumns=3 confirmed")
+    else:
+        print(f"⚠️  gridColumns is {data.get('gridColumns')} (review request expected 3)")
+    
+    if len(data.get("tickerItems", [])) == 3:
+        print(f"✅ tickerItems has 3 items confirmed")
+    else:
+        print(f"⚠️  tickerItems has {len(data.get('tickerItems', []))} items (review request expected 3)")
+    
+    return data
 
-def test_3_upload_without_auth():
-    """Test 3: POST /api/upload WITHOUT auth → 401/403"""
-    print("\n=== Test 3: Upload without auth ===")
+def test_3_get_settings_persisted():
+    """Test 3: GET /api/settings again, verify logoSize=100 persisted"""
+    print("\n=== TEST 3: GET /api/settings again, verify persistence ===")
+    resp = requests.get(f"{BASE_URL}/settings")
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+    data = resp.json()
     
-    png_data = create_test_png(1000)
-    files = {'file': ('test.png', png_data, 'image/png')}
-    
-    # No Authorization header
-    resp = requests.post(f"{BASE_URL}/upload", files=files)
-    
-    print(f"Status: {resp.status_code}")
-    
+    assert data.get("logoSize") == 100, f"logoSize should be 100, got {data.get('logoSize')}"
+    print(f"✅ logoSize=100 persisted correctly")
+    return data
+
+def test_4_put_without_auth():
+    """Test 4: PUT /api/settings without auth with {"logoSize": 50} should return 401/403"""
+    print("\n=== TEST 4: PUT without auth should reject ===")
+    resp = requests.put(
+        f"{BASE_URL}/settings",
+        json={"logoSize": 50}
+    )
     assert resp.status_code in [401, 403], f"Expected 401 or 403, got {resp.status_code}"
-    
-    print(f"✅ Test 3 PASSED: Upload without auth correctly rejected with {resp.status_code}")
+    print(f"✅ PUT without auth correctly rejected with {resp.status_code}")
 
-def test_4_upload_non_image():
-    """Test 4: POST /api/upload with non-image file (text/plain) → 400"""
-    print("\n=== Test 4: Upload non-image file ===")
+def test_5_edge_large_value(token):
+    """Test 5: PUT {"logoSize": 99999}, verify stored, then restore to 64"""
+    print("\n=== TEST 5: Edge case - large value 99999 ===")
     
-    token = get_auth_token()
+    # PUT large value
+    resp = requests.put(
+        f"{BASE_URL}/settings",
+        json={"logoSize": 99999},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+    data = resp.json()
     
-    # Create a text file
-    text_data = b"This is a text file, not an image"
-    files = {'file': ('test.txt', text_data, 'text/plain')}
-    headers = {'Authorization': f'Bearer {token}'}
+    assert data.get("logoSize") == 99999, f"logoSize should be 99999, got {data.get('logoSize')}"
+    print(f"✅ logoSize=99999 stored as-is (no validation)")
     
-    resp = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
+    # Verify persistence
+    resp = requests.get(f"{BASE_URL}/settings")
+    data = resp.json()
+    assert data.get("logoSize") == 99999, f"logoSize should persist as 99999, got {data.get('logoSize')}"
+    print(f"✅ logoSize=99999 persisted")
     
-    print(f"Status: {resp.status_code}")
-    print(f"Response: {resp.text}")
-    
-    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
-    
-    print(f"✅ Test 4 PASSED: Non-image file correctly rejected with 400")
+    # Restore to 64
+    resp = requests.put(
+        f"{BASE_URL}/settings",
+        json={"logoSize": 64},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+    data = resp.json()
+    assert data.get("logoSize") == 64, f"logoSize should be 64, got {data.get('logoSize')}"
+    print(f"✅ logoSize restored to 64")
 
-def test_5_serve_nonexistent():
-    """Test 5: GET /api/uploads/does-not-exist.png → 404"""
-    print("\n=== Test 5: Serve non-existent file ===")
+def test_6_wrong_type(token):
+    """Test 6: PUT {"logoSize": "abc"} (wrong type), report behavior, restore to 64"""
+    print("\n=== TEST 6: Wrong type - string 'abc' ===")
     
-    full_url = f"https://fc5c4110-4c6f-460a-a59f-91cc49411a0b.preview.emergentagent.com/api/uploads/does-not-exist.png"
-    resp = requests.get(full_url)
+    # PUT wrong type
+    resp = requests.put(
+        f"{BASE_URL}/settings",
+        json={"logoSize": "abc"},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    print(f"PUT response status: {resp.status_code}")
     
-    print(f"Status: {resp.status_code}")
+    if resp.status_code == 200:
+        data = resp.json()
+        logo_size_value = data.get("logoSize")
+        logo_size_type = type(logo_size_value).__name__
+        print(f"⚠️  FINDING: Backend accepted string 'abc' and stored it. Response logoSize={repr(logo_size_value)} (type: {logo_size_type})")
+        
+        # Verify what GET returns
+        resp_get = requests.get(f"{BASE_URL}/settings")
+        data_get = resp_get.json()
+        logo_size_get = data_get.get("logoSize")
+        logo_size_get_type = type(logo_size_get).__name__
+        print(f"⚠️  FINDING: GET /api/settings returns logoSize={repr(logo_size_get)} (type: {logo_size_get_type})")
+        
+        if isinstance(logo_size_get, str):
+            print(f"❌ CRITICAL FINDING: logoSize is stored and returned as string '{logo_size_get}' instead of int")
+        
+    elif resp.status_code == 422:
+        print(f"✅ Backend correctly rejected wrong type with 422 (Pydantic validation)")
+        print(f"Response: {resp.text}")
+    else:
+        print(f"⚠️  Unexpected status code: {resp.status_code}")
+        print(f"Response: {resp.text}")
     
-    assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
-    
-    print(f"✅ Test 5 PASSED: Non-existent file correctly returns 404")
+    # Restore to 64
+    resp = requests.put(
+        f"{BASE_URL}/settings",
+        json={"logoSize": 64},
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    if resp.status_code == 200:
+        data = resp.json()
+        print(f"✅ logoSize restored to 64 (type: {type(data.get('logoSize')).__name__})")
+    else:
+        print(f"⚠️  Failed to restore logoSize to 64: {resp.status_code}")
 
-def test_6_size_guard():
-    """Test 6: POST image over 5MB → 413 or error"""
-    print("\n=== Test 6: Size guard (>5MB) ===")
+def test_7_regression(token):
+    """Test 7: Regression - auth login, banners, view tracking"""
+    print("\n=== TEST 7: Regression tests ===")
     
-    token = get_auth_token()
-    
-    # Create a file slightly over 5MB
-    large_data = create_large_png(5.1)
-    print(f"Created test file of size: {len(large_data) / 1024 / 1024:.2f} MB")
-    
-    files = {'file': ('large.png', large_data, 'image/png')}
-    headers = {'Authorization': f'Bearer {token}'}
-    
-    resp = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
-    
-    print(f"Status: {resp.status_code}")
-    print(f"Response: {resp.text}")
-    
-    # Accept 413 or any 4xx error
-    assert resp.status_code >= 400 and resp.status_code < 500, f"Expected 4xx error, got {resp.status_code}"
-    
-    print(f"✅ Test 6 PASSED: Large file correctly rejected with {resp.status_code}")
-
-def test_7_integration_banner():
-    """Test 7: POST /api/banners with uploaded url → created; GET returns it; DELETE cleanup"""
-    print("\n=== Test 7: Integration with banners ===")
-    
-    token = get_auth_token()
-    headers = {'Authorization': f'Bearer {token}'}
-    
-    # Upload an image first
-    png_data = create_test_png(1000)
-    files = {'file': ('banner_logo.png', png_data, 'image/png')}
-    upload_resp = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
-    assert upload_resp.status_code == 200
-    uploaded_url = upload_resp.json()["url"]
-    print(f"Uploaded image URL: {uploaded_url}")
-    
-    # Create a banner with this image
-    banner_data = {
-        "section": "grid",
-        "image": uploaded_url,
-        "url": "https://example.com/test",
-        "title": "Test Banner with Uploaded Logo",
-        "active": True
-    }
-    create_resp = requests.post(f"{BASE_URL}/banners", json=banner_data, headers=headers)
-    print(f"Create banner status: {create_resp.status_code}")
-    assert create_resp.status_code == 200
-    banner = create_resp.json()
-    banner_id = banner["id"]
-    print(f"Created banner ID: {banner_id}")
-    assert banner["image"] == uploaded_url, f"Banner image mismatch: {banner['image']} != {uploaded_url}"
-    
-    # GET /api/banners and verify it's there
-    get_resp = requests.get(f"{BASE_URL}/banners?all=true")
-    assert get_resp.status_code == 200
-    banners = get_resp.json()
-    found = any(b["id"] == banner_id and b["image"] == uploaded_url for b in banners)
-    assert found, f"Banner {banner_id} not found in GET /api/banners"
-    print(f"Banner found in GET /api/banners with correct image URL")
-    
-    # DELETE cleanup
-    delete_resp = requests.delete(f"{BASE_URL}/banners/{banner_id}", headers=headers)
-    assert delete_resp.status_code == 200
-    print(f"Banner deleted successfully")
-    
-    print(f"✅ Test 7 PASSED: Integration with banners works correctly")
-
-def test_8_regression():
-    """Test 8: Quick regression - login, settings, banners"""
-    print("\n=== Test 8: Quick regression ===")
-    
-    # Login
-    login_resp = requests.post(f"{BASE_URL}/auth/login", json={
-        "username": ADMIN_USERNAME,
-        "password": ADMIN_PASSWORD
+    # Auth login
+    resp = requests.post(f"{BASE_URL}/auth/login", json={
+        "username": ADMIN_USER,
+        "password": ADMIN_PASS
     })
-    assert login_resp.status_code == 200
-    assert "token" in login_resp.json()
-    print("✓ Login works")
+    assert resp.status_code == 200, f"Login failed: {resp.status_code}"
+    assert "token" in resp.json(), "Token missing from login response"
+    print(f"✅ POST /api/auth/login works")
     
-    # GET /api/settings
-    settings_resp = requests.get(f"{BASE_URL}/settings")
-    assert settings_resp.status_code == 200
-    settings = settings_resp.json()
-    assert "brandName" in settings
-    print(f"✓ Settings works (brandName: {settings['brandName']})")
-    
-    # GET /api/banners
-    banners_resp = requests.get(f"{BASE_URL}/banners")
-    assert banners_resp.status_code == 200
-    banners = banners_resp.json()
+    # Get banners
+    resp = requests.get(f"{BASE_URL}/banners")
+    assert resp.status_code == 200, f"GET /api/banners failed: {resp.status_code}"
+    banners = resp.json()
+    assert isinstance(banners, list), "Banners should be a list"
     active_count = len([b for b in banners if b.get("active")])
-    print(f"✓ Banners works ({active_count} active banners)")
+    print(f"✅ GET /api/banners returns {len(banners)} banners ({active_count} active)")
     
-    print(f"✅ Test 8 PASSED: Regression tests all passed")
+    if active_count == 5:
+        print(f"✅ 5 active banners confirmed (as per review request)")
+    else:
+        print(f"⚠️  Found {active_count} active banners (review request expected 5)")
+    
+    # View tracking
+    resp = requests.post(f"{BASE_URL}/view")
+    assert resp.status_code == 200, f"POST /api/view failed: {resp.status_code}"
+    assert resp.json().get("ok") == True, "View tracking should return ok:true"
+    print(f"✅ POST /api/view works")
 
 def main():
     print("=" * 60)
-    print("SARAY5-STYLE IMAGE UPLOAD BACKEND TEST")
+    print("BACKEND LOGOSIZE SETTING VERIFICATION")
     print("=" * 60)
     
-    passed = 0
-    failed = 0
-    
     try:
-        # Test 1 & 2 together (need to pass URL between them)
-        url, png_bytes = test_1_upload_with_auth()
-        passed += 1
-        test_2_serve_uploaded_file(url, png_bytes)
-        passed += 1
-    except AssertionError as e:
-        print(f"❌ Test 1 or 2 FAILED: {e}")
-        failed += 1
+        # Get auth token
+        print("\n🔐 Getting auth token...")
+        token = get_auth_token()
+        print(f"✅ Auth token obtained")
+        
+        # Run all tests
+        test_1_get_settings_includes_logosize()
+        test_2_put_partial_logosize_preserves_fields(token)
+        test_3_get_settings_persisted()
+        test_4_put_without_auth()
+        test_5_edge_large_value(token)
+        test_6_wrong_type(token)
+        test_7_regression(token)
+        
+        # Final state verification
+        print("\n" + "=" * 60)
+        print("FINAL STATE VERIFICATION")
+        print("=" * 60)
+        resp = requests.get(f"{BASE_URL}/settings")
+        data = resp.json()
+        final_logo_size = data.get("logoSize")
+        print(f"Final logoSize: {final_logo_size} (type: {type(final_logo_size).__name__})")
+        
+        if final_logo_size == 64 and isinstance(final_logo_size, int):
+            print(f"✅ Final state correct: logoSize=64 (int)")
+        else:
+            print(f"⚠️  Final state: logoSize={repr(final_logo_size)} (expected 64 as int)")
+        
+        print("\n" + "=" * 60)
+        print("ALL TESTS COMPLETED")
+        print("=" * 60)
+        
     except Exception as e:
-        print(f"❌ Test 1 or 2 ERROR: {e}")
-        failed += 1
-    
-    # Test 3
-    try:
-        test_3_upload_without_auth()
-        passed += 1
-    except AssertionError as e:
-        print(f"❌ Test 3 FAILED: {e}")
-        failed += 1
-    except Exception as e:
-        print(f"❌ Test 3 ERROR: {e}")
-        failed += 1
-    
-    # Test 4
-    try:
-        test_4_upload_non_image()
-        passed += 1
-    except AssertionError as e:
-        print(f"❌ Test 4 FAILED: {e}")
-        failed += 1
-    except Exception as e:
-        print(f"❌ Test 4 ERROR: {e}")
-        failed += 1
-    
-    # Test 5
-    try:
-        test_5_serve_nonexistent()
-        passed += 1
-    except AssertionError as e:
-        print(f"❌ Test 5 FAILED: {e}")
-        failed += 1
-    except Exception as e:
-        print(f"❌ Test 5 ERROR: {e}")
-        failed += 1
-    
-    # Test 6
-    try:
-        test_6_size_guard()
-        passed += 1
-    except AssertionError as e:
-        print(f"❌ Test 6 FAILED: {e}")
-        failed += 1
-    except Exception as e:
-        print(f"❌ Test 6 ERROR: {e}")
-        failed += 1
-    
-    # Test 7
-    try:
-        test_7_integration_banner()
-        passed += 1
-    except AssertionError as e:
-        print(f"❌ Test 7 FAILED: {e}")
-        failed += 1
-    except Exception as e:
-        print(f"❌ Test 7 ERROR: {e}")
-        failed += 1
-    
-    # Test 8
-    try:
-        test_8_regression()
-        passed += 1
-    except AssertionError as e:
-        print(f"❌ Test 8 FAILED: {e}")
-        failed += 1
-    except Exception as e:
-        print(f"❌ Test 8 ERROR: {e}")
-        failed += 1
-    
-    print("\n" + "=" * 60)
-    print(f"RESULTS: {passed} passed, {failed} failed out of 8 tests")
-    print("=" * 60)
-    
-    return failed == 0
+        print(f"\n❌ TEST FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
 
 if __name__ == "__main__":
-    success = main()
-    exit(0 if success else 1)
+    main()
