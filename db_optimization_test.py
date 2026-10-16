@@ -7,7 +7,7 @@ import requests
 import json
 
 # Backend base URL from frontend/.env
-BASE_URL = "https://column-ads-hub.preview.emergentagent.com/api"
+BASE_URL = "https://sidelink-app.preview.emergentagent.com/api"
 
 # Test credentials
 ADMIN_USERNAME = "admin"

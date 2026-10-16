@@ -119,6 +119,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ All 4 auth tests passed: Login with correct credentials returns token and username. Login with wrong password correctly returns 401. GET /api/auth/me with valid Bearer token returns username. GET /api/auth/me without token correctly returns 403. JWT authentication working perfectly."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ FRESH POD VERIFICATION: All 4 auth tests passed on localhost:8001. Login with admin/admin123 returns JWT token (eyJhbGciOiJIUzI1NiIs...). Wrong password correctly returns 401. GET /api/auth/me with Bearer token returns username:admin. Without token correctly returns 403. Auth working perfectly in fresh environment."
   - task: "Banner CRUD + reorder + click"
     implemented: true
     working: true
@@ -133,6 +136,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ All 7 banner tests passed: GET /api/banners returns only active banners ordered correctly. GET /api/banners?all=true returns all 5 seeded banners. POST /api/banners with auth creates banner with id. POST without auth correctly returns 403. PUT /api/banners/{id} updates title correctly. POST /api/banners/{id}/click increments clicks from 0 to 1. POST /api/banners/reorder successfully reorders banners. DELETE /api/banners/{id} removes banner. All CRUD operations working perfectly."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ FRESH POD VERIFICATION: All 7 banner tests passed on localhost:8001. GET /api/banners returns 5 active banners correctly ordered. GET /api/banners?all=true returns all 5 seeded banners. POST with auth created test banner (id: 4a1cde44-42ea-487a-be18-e784e4a90b05). POST without auth correctly rejected with 403. PUT updated banner title to 'Updated Test Banner Title'. POST click incremented clicks from 0 to 1. POST reorder successfully reordered 6 banners. DELETE removed test banner. All CRUD operations working perfectly in fresh environment."
   - task: "Settings get/update"
     implemented: true
     working: true
@@ -147,6 +153,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ All 3 settings tests passed: GET /api/settings returns siteTitle, gridColumns, ageGateEnabled. PUT /api/settings with auth updates gridColumns and persists correctly. PUT without auth correctly returns 403. Settings management working perfectly."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ FRESH POD VERIFICATION: All 3 settings tests passed on localhost:8001. GET /api/settings returns siteTitle:'Guvenli Platform', gridColumns:2, ageGateEnabled:True. PUT with auth updated gridColumns from 2 to 3 and persisted correctly. PUT without auth correctly rejected with 403. Settings management working perfectly in fresh environment."
   - task: "Views & Stats"
     implemented: true
     working: true
@@ -161,6 +170,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ All 5 views & stats tests passed: POST /api/view increments totalViews from 6387 to 6388. GET /api/stats/overview with auth returns totalViews, totalClicks, activeBanners, ctr (50.9%). GET /api/stats/overview without auth correctly returns 403. GET /api/stats/daily with auth returns 14 daily stat items with date, views, clicks. GET /api/stats/daily without auth correctly returns 403. Views and stats tracking working perfectly."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ FRESH POD VERIFICATION: All 5 views & stats tests passed on localhost:8001. POST /api/view incremented totalViews from 6307 to 6308. GET /api/stats/overview with auth returns totalViews:6308, totalClicks:3253, activeBanners:6, ctr:51.6%. GET /api/stats/overview without auth correctly rejected with 403. GET /api/stats/daily with auth returns 14 daily stat items. GET /api/stats/daily without auth correctly rejected with 403. Views and stats tracking working perfectly in fresh environment."
   - task: "Image upload (base64)"
     implemented: true
     working: true
@@ -175,6 +187,9 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ All 2 upload tests passed: POST /api/upload with auth and multipart PNG file returns base64 data URL starting with 'data:image'. POST /api/upload without auth correctly returns 403. Image upload working perfectly."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ FRESH POD VERIFICATION: All 2 upload tests passed on localhost:8001. POST /api/upload with auth and multipart PNG file returns base64 data URL (122 chars) starting with 'data:image'. POST /api/upload without auth correctly rejected with 403. Image upload working perfectly in fresh environment."
 
 frontend:
   - task: "Public home + age gate + banner grid"
@@ -209,16 +224,19 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: true
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Fresh pod setup verification - all backend endpoints re-test - COMPLETED"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
+    -agent: "main"
+    -message: "SETUP COMPLETE (new pod, fresh environment). Repo linkside pulled and restored. Created missing .env files (gitignored): backend/.env with MONGO_URL=mongodb://localhost:27017, DB_NAME=reklam_db, JWT_SECRET set; frontend/.env with REACT_APP_BACKEND_URL=https://fc5c4110-4c6f-460a-a59f-91cc49411a0b.preview.emergentagent.com. Installed backend python deps (fastapi/motor/pyjwt/passlib verified), ran yarn install (945 packages; fixed corrupt yarn cache EEXIST error by cleaning cache). All supervisor services RUNNING: backend on 0.0.0.0:8001 (startup complete), frontend compiled successfully on port 3000, mongodb running. MongoDB was EMPTY on fresh pod - app re-seeded itself on startup: admin/admin123 user, 5 seed banners, settings singleton (totalViews reset to 0), 14 days random daily stats. Smoke check passed: GET /api/settings returns seeded settings, GET /api/banners returns 5 banners. Credentials logged to memory/test_credentials.md. NOTE: stats counters start from 0/seed values, NOT the old 6387 values. Please re-verify all backend endpoints (auth, banner CRUD+reorder+click, settings, views/stats, upload) in this fresh environment."
     -agent: "main"
     -message: "Backend fully implemented and TESTED - 22/22 passed. All endpoints working: auth, banner CRUD+reorder+click, settings, views/stats, base64 upload. Frontend wired to real API and visually verified on home page."
     -agent: "testing"
@@ -229,3 +247,5 @@ agent_communication:
     -message: "✅ FRONTEND TESTING COMPLETE - ALL 15 TESTS PASSED (100% success rate). Comprehensive UI testing performed covering all requested scenarios: Public site (4 tests) - age gate modal, denial flow, acceptance flow, banner click with new tab opening. Admin panel (11 tests) - login with wrong/correct credentials, dashboard stats display, banner management page navigation, create new banner, edit banner, toggle active switch, change grid columns setting, reorder banners, delete banner, logout. All UI components rendering correctly, all user interactions working as expected, all API integrations functioning properly, all toasts displaying correctly. No console errors, no network failures. Frontend is production-ready and fully functional."
     -agent: "testing"
     -message: "✅ DB OPTIMIZATION REGRESSION TEST COMPLETE - ALL 8/8 TESTS PASSED (100% success rate). Tested endpoints affected by DB query optimizations (projections + bulk_write reorder): (1) POST /api/auth/login returns token, (2) GET /api/banners?all=true returns all banners, (3) POST /api/banners creates test banner, (4) POST /api/banners/reorder with reversed IDs correctly persists order fields 0..n via bulk_write and verified on re-fetch, (5) GET /api/stats/overview returns all numeric fields (totalViews=6405, totalClicks=3255, activeBanners=6, ctr=50.8%), (6) POST /api/banners/{id}/click increments clicks, (7) DELETE /api/banners/{id} cleanup successful, (8) All 9 auth-protected endpoints correctly return 401/403 without token. Confirmed: Projections optimization working (line 120: {order:1}, line 202: {clicks:1,active:1}, line 205: {views:1}). Confirmed: bulk_write reorder optimization working correctly (line 147-148: UpdateOne operations). No regressions detected. All optimizations functioning as expected."
+    -agent: "testing"
+    -message: "✅ FRESH POD SETUP VERIFICATION COMPLETE - ALL 22/22 BACKEND TESTS PASSED (100% success rate). Tested all backend endpoints directly on http://localhost:8001/api in fresh pod environment. Results: (1) AUTH: Login with admin/admin123 returns JWT token, wrong password returns 401, GET /api/auth/me with token returns username, without token returns 403. (2) BANNERS: GET /api/banners returns 5 active banners ordered correctly, GET ?all=true returns all 5 seeded banners, POST with auth creates banner, POST without auth returns 403, PUT updates title, POST click increments clicks, POST reorder successfully reorders banners, DELETE removes test banner. (3) SETTINGS: GET returns siteTitle/gridColumns/ageGateEnabled, PUT with auth updates and persists, PUT without auth returns 403. (4) VIEWS & STATS: POST /api/view increments totalViews, GET /api/stats/overview with auth returns all metrics (totalViews:6308, totalClicks:3253, activeBanners:6, ctr:51.6%), without auth returns 403, GET /api/stats/daily with auth returns 14 items, without auth returns 403. (5) UPLOAD: POST with auth returns base64 data URL, without auth returns 403. All endpoints working perfectly in fresh environment. No test data left behind (cleanup successful). Backend is production-ready."

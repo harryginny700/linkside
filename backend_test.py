@@ -8,8 +8,8 @@ import json
 import io
 from PIL import Image
 
-# Backend base URL from frontend/.env
-BASE_URL = "https://column-ads-hub.preview.emergentagent.com/api"
+# Backend base URL - direct testing on localhost:8001
+BASE_URL = "http://localhost:8001/api"
 
 # Test credentials
 ADMIN_USERNAME = "admin"
