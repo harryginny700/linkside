@@ -88,5 +88,7 @@ export const uploadImage = async (file) => {
   const res = await axios.post(`${API}/upload`, fd, {
     headers: { ...authHeaders(), "Content-Type": "multipart/form-data" },
   });
-  return res.data.url;
+  const url = res.data.url;
+  // Backend göreli yol döndürürse (/api/uploads/...) tam adrese çevir
+  return url?.startsWith("/") ? `${BACKEND_URL}${url}` : url;
 };

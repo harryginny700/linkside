@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
   Plus, Pencil, Trash2, ArrowUp, ArrowDown, Upload, Link2,
-  ExternalLink, GripVertical,
+  ExternalLink, GripVertical, X,
 } from "lucide-react";
 import {
   fetchBanners, createBanner, updateBanner, deleteBanner, reorderBanners,
@@ -21,17 +21,17 @@ import { useToast } from "../hooks/use-toast";
 
 const empty = {
   title: "", image: "", url: "", section: "grid", orient: "square", span: 1, active: true,
+  badge: "", headline: "", description: "", ctaText: "TIKLA KAYIT OL", accent: "",
 };
 
 export default function AdminBanners() {
   const { toast } = useToast();
   const [banners, setBanners] = useState([]);
-  const [settings, setSettings] = useState({ gridColumns: 2, ageGateEnabled: true });
+  const [settings, setSettings] = useState({ gridColumns: 3 });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
   const [uploading, setUploading] = useState(false);
-  const [titleInput, setTitleInput] = useState("");
   const fileRef = useRef(null);
 
   const refresh = async () => setBanners(await fetchBanners(true));
@@ -39,9 +39,7 @@ export default function AdminBanners() {
   useEffect(() => {
     (async () => {
       setBanners(await fetchBanners(true));
-      const s = await fetchSettings();
-      setSettings(s);
-      setTitleInput(s.siteTitle || "");
+      setSettings(await fetchSettings());
     })();
   }, []);
 
@@ -63,8 +61,8 @@ export default function AdminBanners() {
   };
 
   const handleSave = async () => {
-    if (!form.image || !form.url) {
-      toast({ title: "Eksik bilgi", description: "Görsel ve link zorunludur.", variant: "destructive" });
+    if (!form.url) {
+      toast({ title: "Eksik bilgi", description: "Hedef link zorunludur.", variant: "destructive" });
       return;
     }
     try {
@@ -110,10 +108,28 @@ export default function AdminBanners() {
     await saveSettings(s);
   };
 
-  const saveTitle = async () => {
-    await updateSetting({ siteTitle: titleInput });
-    toast({ title: "Kaydedildi", description: "Site başlığı güncellendi." });
+  // Site görünümü: yerel düzenleme + tek butonla kaydetme
+  const setViewField = (patch) => setSettings((s) => ({ ...s, ...patch }));
+  const saveView = async () => {
+    try {
+      await saveSettings(settings);
+      toast({ title: "Kaydedildi", description: "Site görünümü güncellendi." });
+    } catch (err) {
+      toast({ title: "Hata", description: "Ayarlar kaydedilemedi.", variant: "destructive" });
+    }
   };
+  const addTicker = () => setSettings((s) => ({
+    ...s,
+    tickerItems: [...(s.tickerItems || []), { text: "", color: "#22d3ee" }],
+  }));
+  const updateTicker = (i, patch) => setSettings((s) => ({
+    ...s,
+    tickerItems: (s.tickerItems || []).map((t, j) => (j === i ? { ...t, ...patch } : t)),
+  }));
+  const removeTicker = (i) => setSettings((s) => ({
+    ...s,
+    tickerItems: (s.tickerItems || []).filter((_, j) => j !== i),
+  }));
 
   return (
     <div className="p-8">
@@ -127,41 +143,89 @@ export default function AdminBanners() {
         </Button>
       </div>
 
-      {/* Layout settings */}
+      {/* Site görünümü ayarları */}
       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="text-sm font-semibold text-slate-800">Site Başlığı</p>
-        <p className="text-xs text-slate-500">Tarayıcı sekmesinde görünen başlık</p>
-        <div className="mt-3 flex gap-2">
-          <Input
-            value={titleInput}
-            onChange={(e) => setTitleInput(e.target.value)}
-            placeholder="Örn. Güvenli Platform"
-            className="max-w-md"
-          />
-          <Button onClick={saveTitle} className="bg-slate-900 hover:bg-slate-800">Kaydet</Button>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Site Görünümü</p>
+            <p className="text-xs text-slate-500">Marka, başlık, duyuru barı ve footer metinleri</p>
+          </div>
+          <Button onClick={saveView} className="bg-slate-900 hover:bg-slate-800">Kaydet</Button>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div>
+            <Label>Marka Adı (üst bar logosu)</Label>
+            <Input value={settings.brandName || ""} onChange={(e) => setViewField({ brandName: e.target.value })} placeholder="EMRE18" className="mt-1.5" />
+          </div>
+          <div>
+            <Label>Üst Bar Durum Etiketi</Label>
+            <Input value={settings.statusLabel || ""} onChange={(e) => setViewField({ statusLabel: e.target.value })} placeholder="GÜNCEL" className="mt-1.5" />
+          </div>
+          <div>
+            <Label>Başlık (altın renkli)</Label>
+            <Input value={settings.headerTitle || ""} onChange={(e) => setViewField({ headerTitle: e.target.value })} placeholder="EMRE18" className="mt-1.5" />
+          </div>
+          <div>
+            <Label>Alt Başlık (mavi)</Label>
+            <Input value={settings.headerSubtitle || ""} onChange={(e) => setViewField({ headerSubtitle: e.target.value })} placeholder="GÜNCEL GİRİŞ VE REKLAM ALANLARI" className="mt-1.5" />
+          </div>
+          <div>
+            <Label>Site Başlığı (tarayıcı sekmesi)</Label>
+            <Input value={settings.siteTitle || ""} onChange={(e) => setViewField({ siteTitle: e.target.value })} placeholder="Emre18 — Güncel Giriş" className="mt-1.5" />
+          </div>
+          <div>
+            <Label>Aktif Domainler</Label>
+            <Input value={settings.footerDomains || ""} onChange={(e) => setViewField({ footerDomains: e.target.value })} placeholder="emre18.com" className="mt-1.5" />
+          </div>
+          <div className="md:col-span-2">
+            <Label>Footer Metni</Label>
+            <Input value={settings.footerText || ""} onChange={(e) => setViewField({ footerText: e.target.value })} placeholder="© 2026 EMRE18" className="mt-1.5" />
+          </div>
+        </div>
+
+        {/* Duyuru barı öğeleri */}
+        <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-slate-700">Duyuru Barı Öğeleri</p>
+            <Button variant="outline" size="sm" onClick={addTicker} className="gap-1">
+              <Plus className="h-3.5 w-3.5" /> Ekle
+            </Button>
+          </div>
+          <div className="mt-3 space-y-2">
+            {(settings.tickerItems || []).map((t, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input value={t.text || ""} onChange={(e) => updateTicker(i, { text: e.target.value })} placeholder="Duyuru metni" />
+                <input
+                  type="color"
+                  value={t.color || "#22d3ee"}
+                  onChange={(e) => updateTicker(i, { color: e.target.value })}
+                  className="h-9 w-10 shrink-0 cursor-pointer rounded border border-slate-200 bg-white"
+                  title="Renk"
+                />
+                <Button variant="outline" size="icon" onClick={() => removeTicker(i)} className="shrink-0 text-red-600 hover:bg-red-50">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            {!(settings.tickerItems || []).length && (
+              <p className="text-xs text-slate-400">Öğe yok — Ekle butonu ile duyuru ekleyin.</p>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Kolon Sayısı (Grid)</p>
-            <p className="text-xs text-slate-500">Alt ızgaradaki sütun sayısı</p>
-          </div>
-          <Select value={String(settings.gridColumns)} onValueChange={(v) => updateSetting({ gridColumns: Number(v) })}>
-            <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {[1, 2, 3, 4].map((n) => <SelectItem key={n} value={String(n)}>{n} kolon</SelectItem>)}
-            </SelectContent>
-          </Select>
+      {/* Kolon sayısı */}
+      <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:max-w-sm">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">Kolon Sayısı (Grid)</p>
+          <p className="text-xs text-slate-500">Alt ızgaradaki sütun sayısı</p>
         </div>
-        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">18+ Yaş Kapısı</p>
-            <p className="text-xs text-slate-500">Girişte yaş doğrulama popup'ı</p>
-          </div>
-          <Switch checked={settings.ageGateEnabled} onCheckedChange={(v) => updateSetting({ ageGateEnabled: v })} />
-        </div>
+        <Select value={String(settings.gridColumns || 3)} onValueChange={(v) => updateSetting({ gridColumns: Number(v) })}>
+          <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {[1, 2, 3, 4].map((n) => <SelectItem key={n} value={String(n)}>{n} kolon</SelectItem>)}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Banner list */}
@@ -181,6 +245,9 @@ export default function AdminBanners() {
               </a>
               <div className="mt-1 flex gap-2">
                 <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">{b.section === "top" ? "Üst Banner" : "Grid"}</span>
+                <span className="flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: b.accent || "#94a3b8" }} /> tema
+                </span>
                 <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">{b.orient} · {b.span} kolon</span>
                 <span className="rounded bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-600">{b.clicks} tıklama</span>
               </div>
@@ -194,7 +261,7 @@ export default function AdminBanners() {
 
       {/* Add/Edit dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>{editing ? "Banner Düzenle" : "Yeni Banner"}</DialogTitle>
           </DialogHeader>
@@ -205,7 +272,8 @@ export default function AdminBanners() {
             </div>
 
             <div>
-              <Label>Görsel</Label>
+              <Label>Kart Görseli (Logo)</Label>
+              <p className="text-[11px] text-slate-400">Kartta logo olarak görünür. Yükle ile dosya seçin veya görsel URL girin.</p>
               <div className="mt-1.5 flex gap-2">
                 <div className="relative flex-1">
                   <Link2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -216,7 +284,11 @@ export default function AdminBanners() {
                 </Button>
                 <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
               </div>
-              {form.image && <img src={form.image} alt="" className="mt-2 h-24 w-full rounded-lg border border-slate-200 object-contain bg-slate-50" />}
+              {form.image && (
+                <div className="mt-2 flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 py-3">
+                  <img src={form.image} alt="" className="max-h-9 w-auto max-w-[70%] object-contain" />
+                </div>
+              )}
             </div>
 
             <div>
@@ -254,6 +326,43 @@ export default function AdminBanners() {
                     {[1, 2, 3, 4].map((n) => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-semibold text-slate-700">Kart İçeriği (Yeni Tasarım)</p>
+              <p className="text-[11px] text-slate-400">Boş bırakılan alanlarda varsayılanlar kullanılır.</p>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Rozet</Label>
+                  <Input value={form.badge} onChange={(e) => setForm({ ...form, badge: e.target.value })} placeholder="ZİRVE" className="mt-1.5" />
+                </div>
+                <div>
+                  <Label>CTA Metni</Label>
+                  <Input value={form.ctaText} onChange={(e) => setForm({ ...form, ctaText: e.target.value })} placeholder="TIKLA KAYIT OL" className="mt-1.5" />
+                </div>
+                <div className="col-span-2">
+                  <Label>Büyük Başlık</Label>
+                  <Input value={form.headline} onChange={(e) => setForm({ ...form, headline: e.target.value })} placeholder="3000₺ NAKİT DENEME BONUSU" className="mt-1.5" />
+                </div>
+                <div className="col-span-2">
+                  <Label>Açıklama</Label>
+                  <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="SINIRSIZ ANLIK ÇEKİM İMKANI" className="mt-1.5" />
+                </div>
+                <div className="col-span-2">
+                  <Label>Tema Rengi</Label>
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={form.accent || "#22c55e"}
+                      onChange={(e) => setForm({ ...form, accent: e.target.value })}
+                      className="h-9 w-12 shrink-0 cursor-pointer rounded border border-slate-200 bg-white"
+                      title="Renk seç"
+                    />
+                    <Input value={form.accent} onChange={(e) => setForm({ ...form, accent: e.target.value })} placeholder="Otomatik (boş bırak)" />
+                    <Button type="button" variant="outline" onClick={() => setForm({ ...form, accent: "" })}>Otomatik</Button>
+                  </div>
+                </div>
               </div>
             </div>
 

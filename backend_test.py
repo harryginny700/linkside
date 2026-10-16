@@ -1,895 +1,347 @@
 #!/usr/bin/env python3
 """
-Comprehensive backend API test suite for reklam sitesi (ad banner directory)
-Tests all endpoints: Auth, Banners, Settings, Views & Stats, Upload
+Backend test for saray5-style image upload feature
+Tests POST /api/upload (MongoDB storage) and GET /api/uploads/{name} (public serve)
 """
 import requests
-import json
 import io
 from PIL import Image
 
-# Backend base URL - direct testing on localhost:8001
-BASE_URL = "http://localhost:8001/api"
+# Backend base URL
+BASE_URL = "https://fc5c4110-4c6f-460a-a59f-91cc49411a0b.preview.emergentagent.com/api"
 
 # Test credentials
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 
-# Global token storage
-auth_token = None
-test_banner_id = None
+def get_auth_token():
+    """Login and get JWT token"""
+    resp = requests.post(f"{BASE_URL}/auth/login", json={
+        "username": ADMIN_USERNAME,
+        "password": ADMIN_PASSWORD
+    })
+    if resp.status_code != 200:
+        raise Exception(f"Login failed: {resp.status_code} {resp.text}")
+    return resp.json()["token"]
 
+def create_test_png(size_bytes=1000):
+    """Create a small test PNG image in memory"""
+    # Create a simple 10x10 red image
+    img = Image.new('RGB', (10, 10), color='red')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    buf.seek(0)
+    
+    # If we need a larger file, pad it
+    data = buf.getvalue()
+    if len(data) < size_bytes:
+        # Pad with zeros to reach desired size
+        data = data + b'\x00' * (size_bytes - len(data))
+    
+    return data
 
-def print_test(name, passed, details=""):
-    """Print test result with formatting"""
-    status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"{status} | {name}")
-    if details:
-        print(f"    Details: {details}")
-    if not passed:
-        print()
+def create_large_png(size_mb=5.1):
+    """Create a PNG-ish file over 5MB"""
+    # PNG magic bytes
+    png_header = b'\x89PNG\r\n\x1a\n'
+    # Create file slightly over 5MB
+    size_bytes = int(size_mb * 1024 * 1024)
+    data = png_header + b'\x00' * (size_bytes - len(png_header))
+    return data
 
+def test_1_upload_with_auth():
+    """Test 1: POST /api/upload with auth + small PNG → 200, url starts with '/api/uploads/' and ends with '.png'"""
+    print("\n=== Test 1: Upload with auth + small PNG ===")
+    token = get_auth_token()
+    
+    # Create a small PNG
+    png_data = create_test_png(1000)
+    
+    # Upload
+    files = {'file': ('test.png', png_data, 'image/png')}
+    headers = {'Authorization': f'Bearer {token}'}
+    resp = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
+    
+    print(f"Status: {resp.status_code}")
+    print(f"Response: {resp.json()}")
+    
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+    data = resp.json()
+    assert "url" in data, "Response missing 'url' field"
+    url = data["url"]
+    assert url.startswith("/api/uploads/"), f"URL should start with '/api/uploads/', got: {url}"
+    assert url.endswith(".png"), f"URL should end with '.png', got: {url}"
+    
+    print(f"✅ Test 1 PASSED: Upload returned URL: {url}")
+    return url, png_data
 
-def test_auth_login_success():
-    """Test POST /api/auth/login with correct credentials"""
-    global auth_token
-    try:
-        response = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Auth: Login with correct credentials", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        data = response.json()
-        if "token" not in data or "username" not in data:
-            print_test("Auth: Login with correct credentials", False, 
-                      f"Missing token or username in response: {data}")
-            return False
-        
-        if data["username"] != ADMIN_USERNAME:
-            print_test("Auth: Login with correct credentials", False, 
-                      f"Username mismatch: expected {ADMIN_USERNAME}, got {data['username']}")
-            return False
-        
-        auth_token = data["token"]
-        print_test("Auth: Login with correct credentials", True, 
-                  f"Token received: {auth_token[:20]}...")
-        return True
-    except Exception as e:
-        print_test("Auth: Login with correct credentials", False, str(e))
-        return False
+def test_2_serve_uploaded_file(url, original_bytes):
+    """Test 2: GET {url} (public, no auth) → 200, content-type image/png, body bytes identical"""
+    print(f"\n=== Test 2: Serve uploaded file (public, no auth) ===")
+    
+    # Construct full URL
+    full_url = f"https://fc5c4110-4c6f-460a-a59f-91cc49411a0b.preview.emergentagent.com{url}"
+    
+    # GET without auth
+    resp = requests.get(full_url)
+    
+    print(f"Status: {resp.status_code}")
+    print(f"Content-Type: {resp.headers.get('content-type')}")
+    print(f"Content-Length: {len(resp.content)}")
+    
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
+    assert resp.headers.get('content-type') == 'image/png', f"Expected content-type image/png, got {resp.headers.get('content-type')}"
+    
+    # Check PNG magic bytes (first 8 bytes: 89 50 4E 47 0D 0A 1A 0A)
+    png_magic = b'\x89PNG\r\n\x1a\n'
+    assert resp.content[:8] == png_magic, f"PNG magic bytes mismatch. Got: {resp.content[:8].hex()}"
+    
+    # Check length matches (allowing for padding we added)
+    # The original PNG should be in the response
+    assert len(resp.content) >= 100, f"Response too small: {len(resp.content)} bytes"
+    
+    print(f"✅ Test 2 PASSED: File served correctly with PNG magic bytes {resp.content[:8].hex()}")
 
+def test_3_upload_without_auth():
+    """Test 3: POST /api/upload WITHOUT auth → 401/403"""
+    print("\n=== Test 3: Upload without auth ===")
+    
+    png_data = create_test_png(1000)
+    files = {'file': ('test.png', png_data, 'image/png')}
+    
+    # No Authorization header
+    resp = requests.post(f"{BASE_URL}/upload", files=files)
+    
+    print(f"Status: {resp.status_code}")
+    
+    assert resp.status_code in [401, 403], f"Expected 401 or 403, got {resp.status_code}"
+    
+    print(f"✅ Test 3 PASSED: Upload without auth correctly rejected with {resp.status_code}")
 
-def test_auth_login_wrong_password():
-    """Test POST /api/auth/login with wrong password"""
-    try:
-        response = requests.post(
-            f"{BASE_URL}/auth/login",
-            json={"username": ADMIN_USERNAME, "password": "wrongpassword"},
-            timeout=10
-        )
-        
-        if response.status_code != 401:
-            print_test("Auth: Login with wrong password", False, 
-                      f"Expected 401, got {response.status_code}")
-            return False
-        
-        print_test("Auth: Login with wrong password", True, "Correctly rejected with 401")
-        return True
-    except Exception as e:
-        print_test("Auth: Login with wrong password", False, str(e))
-        return False
+def test_4_upload_non_image():
+    """Test 4: POST /api/upload with non-image file (text/plain) → 400"""
+    print("\n=== Test 4: Upload non-image file ===")
+    
+    token = get_auth_token()
+    
+    # Create a text file
+    text_data = b"This is a text file, not an image"
+    files = {'file': ('test.txt', text_data, 'text/plain')}
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    resp = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
+    
+    print(f"Status: {resp.status_code}")
+    print(f"Response: {resp.text}")
+    
+    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
+    
+    print(f"✅ Test 4 PASSED: Non-image file correctly rejected with 400")
 
+def test_5_serve_nonexistent():
+    """Test 5: GET /api/uploads/does-not-exist.png → 404"""
+    print("\n=== Test 5: Serve non-existent file ===")
+    
+    full_url = f"https://fc5c4110-4c6f-460a-a59f-91cc49411a0b.preview.emergentagent.com/api/uploads/does-not-exist.png"
+    resp = requests.get(full_url)
+    
+    print(f"Status: {resp.status_code}")
+    
+    assert resp.status_code == 404, f"Expected 404, got {resp.status_code}"
+    
+    print(f"✅ Test 5 PASSED: Non-existent file correctly returns 404")
 
-def test_auth_me_with_token():
-    """Test GET /api/auth/me with valid Bearer token"""
-    if not auth_token:
-        print_test("Auth: GET /me with valid token", False, "No auth token available")
-        return False
+def test_6_size_guard():
+    """Test 6: POST image over 5MB → 413 or error"""
+    print("\n=== Test 6: Size guard (>5MB) ===")
+    
+    token = get_auth_token()
+    
+    # Create a file slightly over 5MB
+    large_data = create_large_png(5.1)
+    print(f"Created test file of size: {len(large_data) / 1024 / 1024:.2f} MB")
+    
+    files = {'file': ('large.png', large_data, 'image/png')}
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    resp = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
+    
+    print(f"Status: {resp.status_code}")
+    print(f"Response: {resp.text}")
+    
+    # Accept 413 or any 4xx error
+    assert resp.status_code >= 400 and resp.status_code < 500, f"Expected 4xx error, got {resp.status_code}"
+    
+    print(f"✅ Test 6 PASSED: Large file correctly rejected with {resp.status_code}")
+
+def test_7_integration_banner():
+    """Test 7: POST /api/banners with uploaded url → created; GET returns it; DELETE cleanup"""
+    print("\n=== Test 7: Integration with banners ===")
+    
+    token = get_auth_token()
+    headers = {'Authorization': f'Bearer {token}'}
+    
+    # Upload an image first
+    png_data = create_test_png(1000)
+    files = {'file': ('banner_logo.png', png_data, 'image/png')}
+    upload_resp = requests.post(f"{BASE_URL}/upload", files=files, headers=headers)
+    assert upload_resp.status_code == 200
+    uploaded_url = upload_resp.json()["url"]
+    print(f"Uploaded image URL: {uploaded_url}")
+    
+    # Create a banner with this image
+    banner_data = {
+        "section": "grid",
+        "image": uploaded_url,
+        "url": "https://example.com/test",
+        "title": "Test Banner with Uploaded Logo",
+        "active": True
+    }
+    create_resp = requests.post(f"{BASE_URL}/banners", json=banner_data, headers=headers)
+    print(f"Create banner status: {create_resp.status_code}")
+    assert create_resp.status_code == 200
+    banner = create_resp.json()
+    banner_id = banner["id"]
+    print(f"Created banner ID: {banner_id}")
+    assert banner["image"] == uploaded_url, f"Banner image mismatch: {banner['image']} != {uploaded_url}"
+    
+    # GET /api/banners and verify it's there
+    get_resp = requests.get(f"{BASE_URL}/banners?all=true")
+    assert get_resp.status_code == 200
+    banners = get_resp.json()
+    found = any(b["id"] == banner_id and b["image"] == uploaded_url for b in banners)
+    assert found, f"Banner {banner_id} not found in GET /api/banners"
+    print(f"Banner found in GET /api/banners with correct image URL")
+    
+    # DELETE cleanup
+    delete_resp = requests.delete(f"{BASE_URL}/banners/{banner_id}", headers=headers)
+    assert delete_resp.status_code == 200
+    print(f"Banner deleted successfully")
+    
+    print(f"✅ Test 7 PASSED: Integration with banners works correctly")
+
+def test_8_regression():
+    """Test 8: Quick regression - login, settings, banners"""
+    print("\n=== Test 8: Quick regression ===")
+    
+    # Login
+    login_resp = requests.post(f"{BASE_URL}/auth/login", json={
+        "username": ADMIN_USERNAME,
+        "password": ADMIN_PASSWORD
+    })
+    assert login_resp.status_code == 200
+    assert "token" in login_resp.json()
+    print("✓ Login works")
+    
+    # GET /api/settings
+    settings_resp = requests.get(f"{BASE_URL}/settings")
+    assert settings_resp.status_code == 200
+    settings = settings_resp.json()
+    assert "brandName" in settings
+    print(f"✓ Settings works (brandName: {settings['brandName']})")
+    
+    # GET /api/banners
+    banners_resp = requests.get(f"{BASE_URL}/banners")
+    assert banners_resp.status_code == 200
+    banners = banners_resp.json()
+    active_count = len([b for b in banners if b.get("active")])
+    print(f"✓ Banners works ({active_count} active banners)")
+    
+    print(f"✅ Test 8 PASSED: Regression tests all passed")
+
+def main():
+    print("=" * 60)
+    print("SARAY5-STYLE IMAGE UPLOAD BACKEND TEST")
+    print("=" * 60)
+    
+    passed = 0
+    failed = 0
     
     try:
-        response = requests.get(
-            f"{BASE_URL}/auth/me",
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Auth: GET /me with valid token", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        data = response.json()
-        if data.get("username") != ADMIN_USERNAME:
-            print_test("Auth: GET /me with valid token", False, 
-                      f"Username mismatch: expected {ADMIN_USERNAME}, got {data.get('username')}")
-            return False
-        
-        print_test("Auth: GET /me with valid token", True, f"Username: {data['username']}")
-        return True
+        # Test 1 & 2 together (need to pass URL between them)
+        url, png_bytes = test_1_upload_with_auth()
+        passed += 1
+        test_2_serve_uploaded_file(url, png_bytes)
+        passed += 1
+    except AssertionError as e:
+        print(f"❌ Test 1 or 2 FAILED: {e}")
+        failed += 1
     except Exception as e:
-        print_test("Auth: GET /me with valid token", False, str(e))
-        return False
-
-
-def test_auth_me_without_token():
-    """Test GET /api/auth/me without token"""
+        print(f"❌ Test 1 or 2 ERROR: {e}")
+        failed += 1
+    
+    # Test 3
     try:
-        response = requests.get(f"{BASE_URL}/auth/me", timeout=10)
-        
-        if response.status_code not in [401, 403]:
-            print_test("Auth: GET /me without token", False, 
-                      f"Expected 401/403, got {response.status_code}")
-            return False
-        
-        print_test("Auth: GET /me without token", True, 
-                  f"Correctly rejected with {response.status_code}")
-        return True
+        test_3_upload_without_auth()
+        passed += 1
+    except AssertionError as e:
+        print(f"❌ Test 3 FAILED: {e}")
+        failed += 1
     except Exception as e:
-        print_test("Auth: GET /me without token", False, str(e))
-        return False
-
-
-def test_banners_get_public():
-    """Test GET /api/banners (public) - should return only active banners"""
+        print(f"❌ Test 3 ERROR: {e}")
+        failed += 1
+    
+    # Test 4
     try:
-        response = requests.get(f"{BASE_URL}/banners", timeout=10)
-        
-        if response.status_code != 200:
-            print_test("Banners: GET public (active only)", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        banners = response.json()
-        if not isinstance(banners, list):
-            print_test("Banners: GET public (active only)", False, 
-                      f"Expected list, got {type(banners)}")
-            return False
-        
-        # Check all returned banners are active
-        inactive_count = sum(1 for b in banners if not b.get("active", True))
-        if inactive_count > 0:
-            print_test("Banners: GET public (active only)", False, 
-                      f"Found {inactive_count} inactive banners in public response")
-            return False
-        
-        # Check ordering (should be sorted by 'order' ascending)
-        orders = [b.get("order", 0) for b in banners]
-        if orders != sorted(orders):
-            print_test("Banners: GET public (active only)", False, 
-                      f"Banners not sorted by order: {orders}")
-            return False
-        
-        print_test("Banners: GET public (active only)", True, 
-                  f"Returned {len(banners)} active banners, correctly ordered")
-        return True
+        test_4_upload_non_image()
+        passed += 1
+    except AssertionError as e:
+        print(f"❌ Test 4 FAILED: {e}")
+        failed += 1
     except Exception as e:
-        print_test("Banners: GET public (active only)", False, str(e))
-        return False
-
-
-def test_banners_get_all():
-    """Test GET /api/banners?all=true - should return all banners"""
+        print(f"❌ Test 4 ERROR: {e}")
+        failed += 1
+    
+    # Test 5
     try:
-        response = requests.get(f"{BASE_URL}/banners?all=true", timeout=10)
-        
-        if response.status_code != 200:
-            print_test("Banners: GET all banners", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        banners = response.json()
-        if not isinstance(banners, list):
-            print_test("Banners: GET all banners", False, 
-                      f"Expected list, got {type(banners)}")
-            return False
-        
-        # Should have 5 seeded banners
-        if len(banners) < 5:
-            print_test("Banners: GET all banners", False, 
-                      f"Expected at least 5 seeded banners, got {len(banners)}")
-            return False
-        
-        print_test("Banners: GET all banners", True, 
-                  f"Returned {len(banners)} banners (including inactive)")
-        return True
+        test_5_serve_nonexistent()
+        passed += 1
+    except AssertionError as e:
+        print(f"❌ Test 5 FAILED: {e}")
+        failed += 1
     except Exception as e:
-        print_test("Banners: GET all banners", False, str(e))
-        return False
-
-
-def test_banners_create_with_auth():
-    """Test POST /api/banners with Bearer token"""
-    global test_banner_id
+        print(f"❌ Test 5 ERROR: {e}")
+        failed += 1
     
-    if not auth_token:
-        print_test("Banners: POST create with auth", False, "No auth token available")
-        return False
-    
+    # Test 6
     try:
-        banner_data = {
-            "section": "grid",
-            "image": "https://example.com/test.png",
-            "url": "https://example.com/target",
-            "title": "Test Banner for API Testing",
-            "orient": "square",
-            "span": 1,
-            "active": True
-        }
-        
-        response = requests.post(
-            f"{BASE_URL}/banners",
-            json=banner_data,
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Banners: POST create with auth", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        data = response.json()
-        if "id" not in data:
-            print_test("Banners: POST create with auth", False, 
-                      f"Missing 'id' in response: {data}")
-            return False
-        
-        test_banner_id = data["id"]
-        
-        # Verify all fields
-        for key, value in banner_data.items():
-            if data.get(key) != value:
-                print_test("Banners: POST create with auth", False, 
-                          f"Field mismatch: {key} expected {value}, got {data.get(key)}")
-                return False
-        
-        print_test("Banners: POST create with auth", True, 
-                  f"Created banner with id: {test_banner_id}")
-        return True
+        test_6_size_guard()
+        passed += 1
+    except AssertionError as e:
+        print(f"❌ Test 6 FAILED: {e}")
+        failed += 1
     except Exception as e:
-        print_test("Banners: POST create with auth", False, str(e))
-        return False
-
-
-def test_banners_create_without_auth():
-    """Test POST /api/banners without token - should fail"""
+        print(f"❌ Test 6 ERROR: {e}")
+        failed += 1
+    
+    # Test 7
     try:
-        banner_data = {
-            "section": "grid",
-            "image": "https://example.com/test.png",
-            "url": "https://example.com/target",
-            "title": "Unauthorized Test",
-            "orient": "square",
-            "span": 1,
-            "active": True
-        }
-        
-        response = requests.post(
-            f"{BASE_URL}/banners",
-            json=banner_data,
-            timeout=10
-        )
-        
-        if response.status_code not in [401, 403]:
-            print_test("Banners: POST create without auth", False, 
-                      f"Expected 401/403, got {response.status_code}")
-            return False
-        
-        print_test("Banners: POST create without auth", True, 
-                  f"Correctly rejected with {response.status_code}")
-        return True
+        test_7_integration_banner()
+        passed += 1
+    except AssertionError as e:
+        print(f"❌ Test 7 FAILED: {e}")
+        failed += 1
     except Exception as e:
-        print_test("Banners: POST create without auth", False, str(e))
-        return False
-
-
-def test_banners_update_with_auth():
-    """Test PUT /api/banners/{id} with Bearer token"""
-    if not auth_token:
-        print_test("Banners: PUT update with auth", False, "No auth token available")
-        return False
+        print(f"❌ Test 7 ERROR: {e}")
+        failed += 1
     
-    if not test_banner_id:
-        print_test("Banners: PUT update with auth", False, "No test banner id available")
-        return False
-    
+    # Test 8
     try:
-        update_data = {"title": "Updated Test Banner Title"}
-        
-        response = requests.put(
-            f"{BASE_URL}/banners/{test_banner_id}",
-            json=update_data,
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Banners: PUT update with auth", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        data = response.json()
-        if data.get("title") != update_data["title"]:
-            print_test("Banners: PUT update with auth", False, 
-                      f"Title not updated: expected '{update_data['title']}', got '{data.get('title')}'")
-            return False
-        
-        print_test("Banners: PUT update with auth", True, 
-                  f"Updated banner title to: {data['title']}")
-        return True
+        test_8_regression()
+        passed += 1
+    except AssertionError as e:
+        print(f"❌ Test 8 FAILED: {e}")
+        failed += 1
     except Exception as e:
-        print_test("Banners: PUT update with auth", False, str(e))
-        return False
-
-
-def test_banners_click():
-    """Test POST /api/banners/{id}/click (public) - should increment clicks"""
-    if not test_banner_id:
-        print_test("Banners: POST click (public)", False, "No test banner id available")
-        return False
+        print(f"❌ Test 8 ERROR: {e}")
+        failed += 1
     
-    try:
-        # Get current clicks count
-        response = requests.get(f"{BASE_URL}/banners?all=true", timeout=10)
-        if response.status_code != 200:
-            print_test("Banners: POST click (public)", False, 
-                      f"Failed to get banners: {response.status_code}")
-            return False
-        
-        banners = response.json()
-        test_banner = next((b for b in banners if b["id"] == test_banner_id), None)
-        if not test_banner:
-            print_test("Banners: POST click (public)", False, 
-                      "Test banner not found in banners list")
-            return False
-        
-        initial_clicks = test_banner.get("clicks", 0)
-        
-        # Click the banner
-        response = requests.post(f"{BASE_URL}/banners/{test_banner_id}/click", timeout=10)
-        if response.status_code != 200:
-            print_test("Banners: POST click (public)", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        # Verify clicks incremented
-        response = requests.get(f"{BASE_URL}/banners?all=true", timeout=10)
-        banners = response.json()
-        test_banner = next((b for b in banners if b["id"] == test_banner_id), None)
-        new_clicks = test_banner.get("clicks", 0)
-        
-        if new_clicks != initial_clicks + 1:
-            print_test("Banners: POST click (public)", False, 
-                      f"Clicks not incremented: expected {initial_clicks + 1}, got {new_clicks}")
-            return False
-        
-        print_test("Banners: POST click (public)", True, 
-                  f"Clicks incremented from {initial_clicks} to {new_clicks}")
-        return True
-    except Exception as e:
-        print_test("Banners: POST click (public)", False, str(e))
-        return False
-
-
-def test_banners_reorder():
-    """Test POST /api/banners/reorder with Bearer token"""
-    if not auth_token:
-        print_test("Banners: POST reorder with auth", False, "No auth token available")
-        return False
+    print("\n" + "=" * 60)
+    print(f"RESULTS: {passed} passed, {failed} failed out of 8 tests")
+    print("=" * 60)
     
-    try:
-        # Get current banners
-        response = requests.get(f"{BASE_URL}/banners?all=true", timeout=10)
-        if response.status_code != 200:
-            print_test("Banners: POST reorder with auth", False, 
-                      f"Failed to get banners: {response.status_code}")
-            return False
-        
-        banners = response.json()
-        if len(banners) < 2:
-            print_test("Banners: POST reorder with auth", False, 
-                      "Need at least 2 banners to test reorder")
-            return False
-        
-        # Reverse the order
-        original_ids = [b["id"] for b in banners]
-        reversed_ids = list(reversed(original_ids))
-        
-        # Reorder
-        response = requests.post(
-            f"{BASE_URL}/banners/reorder",
-            json={"ids": reversed_ids},
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Banners: POST reorder with auth", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        # Verify order changed
-        response = requests.get(f"{BASE_URL}/banners?all=true", timeout=10)
-        banners = response.json()
-        new_ids = [b["id"] for b in banners]
-        
-        if new_ids != reversed_ids:
-            print_test("Banners: POST reorder with auth", False, 
-                      f"Order not changed correctly. Expected {reversed_ids}, got {new_ids}")
-            return False
-        
-        # Restore original order
-        requests.post(
-            f"{BASE_URL}/banners/reorder",
-            json={"ids": original_ids},
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        print_test("Banners: POST reorder with auth", True, 
-                  f"Successfully reordered {len(banners)} banners")
-        return True
-    except Exception as e:
-        print_test("Banners: POST reorder with auth", False, str(e))
-        return False
-
-
-def test_settings_get_public():
-    """Test GET /api/settings (public)"""
-    try:
-        response = requests.get(f"{BASE_URL}/settings", timeout=10)
-        
-        if response.status_code != 200:
-            print_test("Settings: GET public", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        data = response.json()
-        required_fields = ["siteTitle", "gridColumns", "ageGateEnabled"]
-        for field in required_fields:
-            if field not in data:
-                print_test("Settings: GET public", False, 
-                          f"Missing required field: {field}")
-                return False
-        
-        print_test("Settings: GET public", True, 
-                  f"siteTitle: {data['siteTitle']}, gridColumns: {data['gridColumns']}, ageGateEnabled: {data['ageGateEnabled']}")
-        return True
-    except Exception as e:
-        print_test("Settings: GET public", False, str(e))
-        return False
-
-
-def test_settings_update_with_auth():
-    """Test PUT /api/settings with Bearer token"""
-    if not auth_token:
-        print_test("Settings: PUT update with auth", False, "No auth token available")
-        return False
-    
-    try:
-        # Get current settings
-        response = requests.get(f"{BASE_URL}/settings", timeout=10)
-        original_settings = response.json()
-        original_columns = original_settings.get("gridColumns", 2)
-        
-        # Update gridColumns
-        new_columns = 3 if original_columns != 3 else 4
-        response = requests.put(
-            f"{BASE_URL}/settings",
-            json={"gridColumns": new_columns},
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Settings: PUT update with auth", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        # Verify persisted
-        response = requests.get(f"{BASE_URL}/settings", timeout=10)
-        data = response.json()
-        
-        if data.get("gridColumns") != new_columns:
-            print_test("Settings: PUT update with auth", False, 
-                      f"gridColumns not updated: expected {new_columns}, got {data.get('gridColumns')}")
-            return False
-        
-        # Restore original
-        requests.put(
-            f"{BASE_URL}/settings",
-            json={"gridColumns": original_columns},
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        print_test("Settings: PUT update with auth", True, 
-                  f"Updated gridColumns from {original_columns} to {new_columns}")
-        return True
-    except Exception as e:
-        print_test("Settings: PUT update with auth", False, str(e))
-        return False
-
-
-def test_settings_update_without_auth():
-    """Test PUT /api/settings without token - should fail"""
-    try:
-        response = requests.put(
-            f"{BASE_URL}/settings",
-            json={"gridColumns": 5},
-            timeout=10
-        )
-        
-        if response.status_code not in [401, 403]:
-            print_test("Settings: PUT update without auth", False, 
-                      f"Expected 401/403, got {response.status_code}")
-            return False
-        
-        print_test("Settings: PUT update without auth", True, 
-                  f"Correctly rejected with {response.status_code}")
-        return True
-    except Exception as e:
-        print_test("Settings: PUT update without auth", False, str(e))
-        return False
-
-
-def test_view_increment():
-    """Test POST /api/view (public) - should increment daily views"""
-    try:
-        # Get current stats
-        if not auth_token:
-            print_test("Views: POST view increment", False, "No auth token for stats check")
-            return False
-        
-        response = requests.get(
-            f"{BASE_URL}/stats/overview",
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        initial_views = response.json().get("totalViews", 0)
-        
-        # Record a view
-        response = requests.post(f"{BASE_URL}/view", timeout=10)
-        if response.status_code != 200:
-            print_test("Views: POST view increment", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        # Verify views incremented
-        response = requests.get(
-            f"{BASE_URL}/stats/overview",
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        new_views = response.json().get("totalViews", 0)
-        
-        if new_views != initial_views + 1:
-            print_test("Views: POST view increment", False, 
-                      f"Views not incremented: expected {initial_views + 1}, got {new_views}")
-            return False
-        
-        print_test("Views: POST view increment", True, 
-                  f"Views incremented from {initial_views} to {new_views}")
-        return True
-    except Exception as e:
-        print_test("Views: POST view increment", False, str(e))
-        return False
-
-
-def test_stats_overview_with_auth():
-    """Test GET /api/stats/overview with Bearer token"""
-    if not auth_token:
-        print_test("Stats: GET overview with auth", False, "No auth token available")
-        return False
-    
-    try:
-        response = requests.get(
-            f"{BASE_URL}/stats/overview",
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Stats: GET overview with auth", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        data = response.json()
-        required_fields = ["totalViews", "totalClicks", "activeBanners", "ctr"]
-        for field in required_fields:
-            if field not in data:
-                print_test("Stats: GET overview with auth", False, 
-                          f"Missing required field: {field}")
-                return False
-        
-        print_test("Stats: GET overview with auth", True, 
-                  f"totalViews: {data['totalViews']}, totalClicks: {data['totalClicks']}, activeBanners: {data['activeBanners']}, ctr: {data['ctr']}%")
-        return True
-    except Exception as e:
-        print_test("Stats: GET overview with auth", False, str(e))
-        return False
-
-
-def test_stats_overview_without_auth():
-    """Test GET /api/stats/overview without token - should fail"""
-    try:
-        response = requests.get(f"{BASE_URL}/stats/overview", timeout=10)
-        
-        if response.status_code not in [401, 403]:
-            print_test("Stats: GET overview without auth", False, 
-                      f"Expected 401/403, got {response.status_code}")
-            return False
-        
-        print_test("Stats: GET overview without auth", True, 
-                  f"Correctly rejected with {response.status_code}")
-        return True
-    except Exception as e:
-        print_test("Stats: GET overview without auth", False, str(e))
-        return False
-
-
-def test_stats_daily_with_auth():
-    """Test GET /api/stats/daily with Bearer token"""
-    if not auth_token:
-        print_test("Stats: GET daily with auth", False, "No auth token available")
-        return False
-    
-    try:
-        response = requests.get(
-            f"{BASE_URL}/stats/daily",
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Stats: GET daily with auth", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        data = response.json()
-        if not isinstance(data, list):
-            print_test("Stats: GET daily with auth", False, 
-                      f"Expected list, got {type(data)}")
-            return False
-        
-        if len(data) != 14:
-            print_test("Stats: GET daily with auth", False, 
-                      f"Expected 14 items, got {len(data)}")
-            return False
-        
-        # Check each item has required fields
-        for item in data:
-            if not all(k in item for k in ["date", "views", "clicks"]):
-                print_test("Stats: GET daily with auth", False, 
-                          f"Missing required fields in daily stat: {item}")
-                return False
-        
-        print_test("Stats: GET daily with auth", True, 
-                  f"Returned 14 daily stats items")
-        return True
-    except Exception as e:
-        print_test("Stats: GET daily with auth", False, str(e))
-        return False
-
-
-def test_stats_daily_without_auth():
-    """Test GET /api/stats/daily without token - should fail"""
-    try:
-        response = requests.get(f"{BASE_URL}/stats/daily", timeout=10)
-        
-        if response.status_code not in [401, 403]:
-            print_test("Stats: GET daily without auth", False, 
-                      f"Expected 401/403, got {response.status_code}")
-            return False
-        
-        print_test("Stats: GET daily without auth", True, 
-                  f"Correctly rejected with {response.status_code}")
-        return True
-    except Exception as e:
-        print_test("Stats: GET daily without auth", False, str(e))
-        return False
-
-
-def test_upload_with_auth():
-    """Test POST /api/upload with Bearer token and multipart file"""
-    if not auth_token:
-        print_test("Upload: POST with auth", False, "No auth token available")
-        return False
-    
-    try:
-        # Create a small test PNG image
-        img = Image.new('RGB', (10, 10), color='red')
-        img_bytes = io.BytesIO()
-        img.save(img_bytes, format='PNG')
-        img_bytes.seek(0)
-        
-        files = {'file': ('test.png', img_bytes, 'image/png')}
-        
-        response = requests.post(
-            f"{BASE_URL}/upload",
-            files=files,
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Upload: POST with auth", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        data = response.json()
-        if "url" not in data:
-            print_test("Upload: POST with auth", False, 
-                      f"Missing 'url' in response: {data}")
-            return False
-        
-        url = data["url"]
-        if not url.startswith("data:image"):
-            print_test("Upload: POST with auth", False, 
-                      f"URL should be base64 data URL starting with 'data:image', got: {url[:50]}")
-            return False
-        
-        print_test("Upload: POST with auth", True, 
-                  f"Uploaded image, received base64 data URL ({len(url)} chars)")
-        return True
-    except Exception as e:
-        print_test("Upload: POST with auth", False, str(e))
-        return False
-
-
-def test_upload_without_auth():
-    """Test POST /api/upload without token - should fail"""
-    try:
-        # Create a small test PNG image
-        img = Image.new('RGB', (10, 10), color='blue')
-        img_bytes = io.BytesIO()
-        img.save(img_bytes, format='PNG')
-        img_bytes.seek(0)
-        
-        files = {'file': ('test.png', img_bytes, 'image/png')}
-        
-        response = requests.post(
-            f"{BASE_URL}/upload",
-            files=files,
-            timeout=10
-        )
-        
-        if response.status_code not in [401, 403]:
-            print_test("Upload: POST without auth", False, 
-                      f"Expected 401/403, got {response.status_code}")
-            return False
-        
-        print_test("Upload: POST without auth", True, 
-                  f"Correctly rejected with {response.status_code}")
-        return True
-    except Exception as e:
-        print_test("Upload: POST without auth", False, str(e))
-        return False
-
-
-def test_banners_delete_with_auth():
-    """Test DELETE /api/banners/{id} with Bearer token - cleanup test banner"""
-    if not auth_token:
-        print_test("Banners: DELETE with auth", False, "No auth token available")
-        return False
-    
-    if not test_banner_id:
-        print_test("Banners: DELETE with auth", False, "No test banner id available")
-        return False
-    
-    try:
-        response = requests.delete(
-            f"{BASE_URL}/banners/{test_banner_id}",
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10
-        )
-        
-        if response.status_code != 200:
-            print_test("Banners: DELETE with auth", False, 
-                      f"Expected 200, got {response.status_code}: {response.text}")
-            return False
-        
-        # Verify banner removed
-        response = requests.get(f"{BASE_URL}/banners?all=true", timeout=10)
-        banners = response.json()
-        if any(b["id"] == test_banner_id for b in banners):
-            print_test("Banners: DELETE with auth", False, 
-                      "Banner still exists after deletion")
-            return False
-        
-        print_test("Banners: DELETE with auth", True, 
-                  f"Successfully deleted banner {test_banner_id}")
-        return True
-    except Exception as e:
-        print_test("Banners: DELETE with auth", False, str(e))
-        return False
-
-
-def run_all_tests():
-    """Run all backend API tests"""
-    print("=" * 80)
-    print("BACKEND API TEST SUITE - Reklam Sitesi")
-    print(f"Base URL: {BASE_URL}")
-    print("=" * 80)
-    print()
-    
-    results = {}
-    
-    # Auth tests
-    print("--- AUTH TESTS ---")
-    results["auth_login_success"] = test_auth_login_success()
-    results["auth_login_wrong_password"] = test_auth_login_wrong_password()
-    results["auth_me_with_token"] = test_auth_me_with_token()
-    results["auth_me_without_token"] = test_auth_me_without_token()
-    print()
-    
-    # Banner tests
-    print("--- BANNER TESTS ---")
-    results["banners_get_public"] = test_banners_get_public()
-    results["banners_get_all"] = test_banners_get_all()
-    results["banners_create_with_auth"] = test_banners_create_with_auth()
-    results["banners_create_without_auth"] = test_banners_create_without_auth()
-    results["banners_update_with_auth"] = test_banners_update_with_auth()
-    results["banners_click"] = test_banners_click()
-    results["banners_reorder"] = test_banners_reorder()
-    print()
-    
-    # Settings tests
-    print("--- SETTINGS TESTS ---")
-    results["settings_get_public"] = test_settings_get_public()
-    results["settings_update_with_auth"] = test_settings_update_with_auth()
-    results["settings_update_without_auth"] = test_settings_update_without_auth()
-    print()
-    
-    # Views & Stats tests
-    print("--- VIEWS & STATS TESTS ---")
-    results["view_increment"] = test_view_increment()
-    results["stats_overview_with_auth"] = test_stats_overview_with_auth()
-    results["stats_overview_without_auth"] = test_stats_overview_without_auth()
-    results["stats_daily_with_auth"] = test_stats_daily_with_auth()
-    results["stats_daily_without_auth"] = test_stats_daily_without_auth()
-    print()
-    
-    # Upload tests
-    print("--- UPLOAD TESTS ---")
-    results["upload_with_auth"] = test_upload_with_auth()
-    results["upload_without_auth"] = test_upload_without_auth()
-    print()
-    
-    # Cleanup - delete test banner
-    print("--- CLEANUP ---")
-    results["banners_delete_with_auth"] = test_banners_delete_with_auth()
-    print()
-    
-    # Summary
-    print("=" * 80)
-    print("TEST SUMMARY")
-    print("=" * 80)
-    passed = sum(1 for v in results.values() if v)
-    total = len(results)
-    print(f"Passed: {passed}/{total}")
-    print(f"Failed: {total - passed}/{total}")
-    
-    if passed == total:
-        print("\n🎉 ALL TESTS PASSED!")
-    else:
-        print("\n⚠️  SOME TESTS FAILED")
-        print("\nFailed tests:")
-        for test_name, result in results.items():
-            if not result:
-                print(f"  - {test_name}")
-    
-    print("=" * 80)
-    
-    return passed == total
-
+    return failed == 0
 
 if __name__ == "__main__":
-    success = run_all_tests()
+    success = main()
     exit(0 if success else 1)

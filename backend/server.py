@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi.responses import Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -7,7 +8,6 @@ from pymongo import UpdateOne
 import os
 import logging
 import uuid
-import base64
 import jwt
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -49,6 +49,11 @@ class Banner(BaseModel):
     order: int = 0
     active: bool = True
     clicks: int = 0
+    badge: str = ""                # köşe rozeti (örn. ZİRVE)
+    headline: str = ""             # büyük başlık (örn. 3000₺ NAKİT DENEME BONUSU)
+    description: str = ""          # alt açıklama (örn. SINIRSIZ ANLIK ÇEKİM İMKANI)
+    ctaText: str = ""              # CTA metni (örn. TIKLA KAYIT OL)
+    accent: str = ""               # tema rengi hex (boşsa otomatik palet)
 
 
 class BannerIn(BaseModel):
@@ -59,16 +64,40 @@ class BannerIn(BaseModel):
     orient: str = "square"
     span: int = 1
     active: bool = True
+    badge: str = ""
+    headline: str = ""
+    description: str = ""
+    ctaText: str = ""
+    accent: str = ""
 
 
 class ReorderIn(BaseModel):
     ids: List[str]
 
 
+class TickerItem(BaseModel):
+    text: str = ""
+    color: str = "#22d3ee"
+
+
+DEFAULT_TICKER = [
+    {"text": "YENİ ÜYELERE %200 HOŞ GELDİN BONUSU", "color": "#22d3ee"},
+    {"text": "ANINDA PARA ÇEKİM GARANTİSİ", "color": "#f5b81c"},
+    {"text": "GÜNCEL GİRİŞ ADRESLERİ 7/24 GÜNCELLENİR", "color": "#3b82f6"},
+]
+
+
 class Settings(BaseModel):
-    siteTitle: str = "Guvenli Platform"
-    gridColumns: int = 2
-    ageGateEnabled: bool = True
+    siteTitle: str = "Emre18 — Güncel Giriş"
+    brandName: str = "EMRE18"
+    headerTitle: str = "EMRE18"
+    headerSubtitle: str = "GÜNCEL GİRİŞ VE REKLAM ALANLARI"
+    statusLabel: str = "GÜNCEL"
+    tickerItems: List[TickerItem] = DEFAULT_TICKER
+    footerText: str = "© 2026 EMRE18 — 18+: SORUMLU REKLAM YAYINCILIĞI"
+    footerDomains: str = "emre18.com"
+    gridColumns: int = 3
+    ageGateEnabled: bool = False
 
 
 # ----------------- Auth helpers -----------------
@@ -166,7 +195,10 @@ async def get_settings():
         default["totalViews"] = 0
         await db.settings.insert_one(default)
         s = default
-    return clean(s)
+    # Eski kayıtlarda eksik alanları varsayılanlarla tamamla
+    merged = Settings().dict()
+    merged.update({k: v for k, v in s.items() if k != "_id"})
+    return clean(merged)
 
 
 @api_router.put("/settings")
@@ -232,9 +264,28 @@ async def stats_daily(username: str = Depends(get_current_user)):
 @api_router.post("/upload")
 async def upload(file: UploadFile = File(...), username: str = Depends(get_current_user)):
     content = await file.read()
-    mime = file.content_type or "image/png"
-    b64 = base64.b64encode(content).decode("utf-8")
-    return {"url": f"data:{mime};base64,{b64}"}
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Dosya cok buyuk (maks 5MB)")
+    if (file.content_type or "") and not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Sadece gorsel dosyalari yuklenebilir")
+    ext = Path(file.filename or "").suffix[:8].lower() or ".png"
+    if not ext.lstrip(".").isalnum():
+        ext = ".png"
+    doc = {
+        "id": str(uuid.uuid4()) + ext,
+        "content_type": file.content_type or "image/png",
+        "data": content,
+    }
+    await db.uploads.insert_one(doc)
+    return {"url": f"/api/uploads/{doc['id']}"}
+
+
+@api_router.get("/uploads/{name}")
+async def serve_upload(name: str):
+    doc = await db.uploads.find_one({"id": name})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Dosya bulunamadi")
+    return Response(content=bytes(doc["data"]), media_type=doc.get("content_type", "image/png"))
 
 
 @api_router.get("/")
